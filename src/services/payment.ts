@@ -6,8 +6,10 @@ export interface CheckoutResult {
 export interface CheckoutSessionInput {
   memberId: string;
   membershipYearId: string;
+  membershipYear: number;
   enrollmentId?: string;
   amountCents: number;
+  discountReason?: string | null;
   successUrl: string;
   cancelUrl: string;
 }
@@ -28,16 +30,29 @@ export const stripePaymentService: PaymentService = {
             currency: "usd",
             unit_amount: input.amountCents,
             product_data: {
-              name: "MCFGC Membership",
+              name: `MCFGC Membership Renewal ${input.membershipYear}`,
             },
           },
           quantity: 1,
         },
       ],
+      payment_intent_data: {
+        metadata: {
+          memberId: input.memberId,
+          membershipYearId: input.membershipYearId,
+          membershipYear: String(input.membershipYear),
+          enrollmentId: input.enrollmentId ?? "",
+          priceCents: String(input.amountCents),
+          discountReason: input.discountReason ?? "NONE",
+        },
+      },
       metadata: {
         memberId: input.memberId,
         membershipYearId: input.membershipYearId,
-        enrollmentId: input.enrollmentId,
+        membershipYear: String(input.membershipYear),
+        enrollmentId: input.enrollmentId ?? "",
+        priceCents: String(input.amountCents),
+        discountReason: input.discountReason ?? "NONE",
       },
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,

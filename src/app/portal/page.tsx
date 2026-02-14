@@ -1,14 +1,30 @@
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { requireCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import {
+  getLateRenewalPolicy,
+  getRenewalPriceForMember,
+  isRenewalBlockedByLatePolicy,
+} from "@/services/membership";
+import { PayRenewalButton } from "./pay-renewal-button";
+
+function formatCurrency(amountCents: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amountCents / 100);
+}
 
 export default async function MemberPortalPage() {
   const user = await requireCurrentUser("/portal");
   const currentYear = getCurrentYearInNewYork();
 
-  const membershipYear = await prisma.membershipYear.findUnique({
-    where: { year: currentYear },
-  });
+  const [member, membershipYear] = await Promise.all([
+    prisma.member.findUnique({ where: { id: user.memberId } }),
+    prisma.membershipYear.findUnique({
+      where: { year: currentYear },
+    }),
+  ]);
 
   const enrollment = membershipYear
     ? await prisma.membershipEnrollment.findUnique({
@@ -20,6 +36,24 @@ export default async function MemberPortalPage() {
         },
       })
     : null;
+
+  const price = member ? getRenewalPriceForMember(member) : null;
+  const lateRenewalPolicy = await getLateRenewalPolicy();
+  const renewalBlocked = membershipYear
+    ? await isRenewalBlockedByLatePolicy({ membershipYear })
+    : false;
+
+  const alreadyRenewed = enrollment?.status === "ACTIVE";
+  const canPay = Boolean(member && membershipYear && !alreadyRenewed && !renewalBlocked);
+
+  let disabledReason = "";
+  if (!membershipYear) {
+    disabledReason = `Membership year ${currentYear} has not been opened yet.`;
+  } else if (alreadyRenewed) {
+    disabledReason = "Your renewal is already paid and active for this year.";
+  } else if (renewalBlocked) {
+    disabledReason = "Renewal is past due and late renewals are currently disabled.";
+  }
 
   return (
     <main className="mx-auto max-w-3xl p-6">
@@ -36,7 +70,7 @@ export default async function MemberPortalPage() {
         <h2 className="mb-4 text-xl font-semibold">Current Membership</h2>
 
         {membershipYear ? (
-          <div className="space-y-2 text-sm">
+          <div className="space-y-3 text-sm">
             <p>
               <span className="font-medium">Year:</span> {membershipYear.year}
             </p>
@@ -51,8 +85,31 @@ export default async function MemberPortalPage() {
             </p>
             <p>
               <span className="font-medium">Status:</span>{" "}
-              {enrollment ? enrollment.status : "NOT_ENROLLED"}
+              {enrollment ? enrollment.status : "PENDING_RENEWAL"}
             </p>
+            {price ? (
+              <>
+                <p>
+                  <span className="font-medium">Renewal Price:</span>{" "}
+                  {formatCurrency(price.amountCents)}
+                </p>
+                <p>
+                  <span className="font-medium">Discount:</span>{" "}
+                  {price.discountReason ?? "NONE"}
+                </p>
+              </>
+            ) : null}
+            <p>
+              <span className="font-medium">Late Renewal Policy:</span>{" "}
+              {lateRenewalPolicy.enabled ? "Enabled" : "Disabled"}
+            </p>
+
+            <div className="pt-3">
+              <PayRenewalButton
+                disabled={!canPay}
+                disabledReason={disabledReason}
+              />
+            </div>
           </div>
         ) : (
           <p className="text-sm text-gray-600">

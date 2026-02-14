@@ -1,17 +1,56 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type Member, type MembershipYear } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   buildMembershipYearDates,
   getCurrentYearInNewYork,
+  isSeniorFromDob,
 } from "@/lib/membership-dates";
 
 export const MEMBERSHIP_CAP = 350;
+export const STANDARD_RENEWAL_PRICE_CENTS = 15000;
+export const DISCOUNT_RENEWAL_PRICE_CENTS = 10000;
 const ACCEPT_LATE_RENEWALS_KEY = "acceptLateRenewals";
 
 export type LateRenewalPolicy = {
   enabled: boolean;
   policyNotes: string;
 };
+
+export type RenewalDiscountReason = "DISABLED_VETERAN" | "AGE_65_PLUS" | null;
+
+export function getRenewalPriceForMember(
+  member: Pick<Member, "isDisabledVeteran" | "isSenior" | "dob">
+): { amountCents: number; discountReason: RenewalDiscountReason } {
+  if (member.isDisabledVeteran) {
+    return {
+      amountCents: DISCOUNT_RENEWAL_PRICE_CENTS,
+      discountReason: "DISABLED_VETERAN",
+    };
+  }
+
+  const seniorEligible = member.isSenior || isSeniorFromDob(member.dob);
+  if (seniorEligible) {
+    return {
+      amountCents: DISCOUNT_RENEWAL_PRICE_CENTS,
+      discountReason: "AGE_65_PLUS",
+    };
+  }
+
+  return {
+    amountCents: STANDARD_RENEWAL_PRICE_CENTS,
+    discountReason: null,
+  };
+}
+
+export async function isRenewalBlockedByLatePolicy(input: {
+  membershipYear: Pick<MembershipYear, "renewalDueAt">;
+  asOf?: Date;
+}): Promise<boolean> {
+  const lateRenewalPolicy = await getLateRenewalPolicy();
+  const now = input.asOf ?? new Date();
+  const isLate = now > input.membershipYear.renewalDueAt;
+  return isLate && !lateRenewalPolicy.enabled;
+}
 
 export async function getLateRenewalPolicy(): Promise<LateRenewalPolicy> {
   const setting = await prisma.systemSettings.findUnique({
