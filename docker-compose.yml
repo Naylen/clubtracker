@@ -17,6 +17,7 @@ services:
       retries: 20
 
   app:
+    profiles: ["dev"]
     build:
       context: .
       target: dev
@@ -26,6 +27,10 @@ services:
     environment:
       NODE_ENV: development
       DATABASE_URL: postgresql://${POSTGRES_USER:-clubtracker}:${POSTGRES_PASSWORD:-clubtracker_dev_password}@db:5432/${POSTGRES_DB:-clubtracker}?schema=public
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-clubtracker}
+      POSTGRES_DB: ${POSTGRES_DB:-clubtracker}
       NEXTAUTH_URL: http://localhost:3000
     depends_on:
       db:
@@ -39,6 +44,39 @@ services:
     command: >
       sh -c "if [ ! -d node_modules ] || [ -z \"$(ls -A node_modules 2>/dev/null)\" ];
       then npm install; fi && npm run dev"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  app-prod:
+    profiles: ["prod"]
+    build:
+      context: .
+      target: prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clubtracker}:${POSTGRES_PASSWORD:-clubtracker_dev_password}@db:5432/${POSTGRES_DB:-clubtracker}?schema=public
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-clubtracker}
+      POSTGRES_DB: ${POSTGRES_DB:-clubtracker}
+      NEXTAUTH_URL: http://localhost:3000
+      SEED_ON_START: ${SEED_ON_START:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
 
 volumes:
   pgdata:

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
+import { getStripeClient } from "@/lib/stripe";
 import { processStripeEvent, verifyStripeEvent } from "@/services/stripe-webhook";
 
 export async function POST(request: NextRequest) {
@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
 
   let event;
   try {
+    const stripe = getStripeClient();
     event = verifyStripeEvent({
       rawBody,
       signature,

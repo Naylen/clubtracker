@@ -20,7 +20,8 @@ export interface PaymentService {
 
 export const stripePaymentService: PaymentService = {
   async createCheckoutSession(input) {
-    const { stripe } = await import("@/lib/stripe");
+    const { getStripeClient } = await import("@/lib/stripe");
+    const stripe = getStripeClient();
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",

@@ -3,7 +3,11 @@ set -e
 
 if [ -n "${DATABASE_URL:-}" ]; then
   echo "[entrypoint] waiting for postgres"
-  until pg_isready -d "$DATABASE_URL" >/dev/null 2>&1; do
+  until pg_isready \
+    -h "${POSTGRES_HOST:-db}" \
+    -p "${POSTGRES_PORT:-5432}" \
+    -U "${POSTGRES_USER:-clubtracker}" \
+    -d "${POSTGRES_DB:-clubtracker}" >/dev/null 2>&1; do
     sleep 2
   done
 
@@ -11,8 +15,8 @@ if [ -n "${DATABASE_URL:-}" ]; then
   npx prisma migrate deploy
 
   if [ "${SEED_ON_START:-false}" = "true" ]; then
-    echo "[entrypoint] running seed"
-    npm run db:seed
+    echo "[entrypoint] running prisma db seed"
+    npx prisma db seed
   fi
 fi
 
