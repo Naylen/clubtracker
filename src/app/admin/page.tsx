@@ -1,10 +1,21 @@
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
+import { createOrOpenCurrentYear } from "@/services/membership";
 
 export default async function AdminDashboardPage() {
   await requireAdmin("/admin");
+
+  async function createOrOpenYearAction() {
+    "use server";
+
+    await requireAdmin("/admin");
+    await createOrOpenCurrentYear();
+    revalidatePath("/admin");
+    revalidatePath("/portal");
+  }
 
   const currentYear = getCurrentYearInNewYork();
   const membershipYear = await prisma.membershipYear.findUnique({
@@ -31,6 +42,14 @@ export default async function AdminDashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+        <form action={createOrOpenYearAction}>
+          <button
+            className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white"
+            type="submit"
+          >
+            Create or Open Current Year
+          </button>
+        </form>
       </div>
 
       <section className="grid gap-4 sm:grid-cols-3">
@@ -54,7 +73,7 @@ export default async function AdminDashboardPage() {
         <p className="mb-3 text-sm text-gray-600">
           {membershipYear
             ? `Current year ${membershipYear.year} is open. Renewal due by ${membershipYear.renewalDueAt.toLocaleDateString()}.`
-            : `No membership year exists yet for ${currentYear}. Use the current-year action endpoint to create it.`}
+            : `No membership year exists yet for ${currentYear}.`}
         </p>
         <Link className="text-sm font-medium underline" href="/admin/members">
           Manage member roster
