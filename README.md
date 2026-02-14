@@ -35,16 +35,22 @@ cp .env.example .env
 Edit `.env` with your values:
 
 - `DATABASE_URL` — your Postgres connection string
-- `NEXTAUTH_SECRET` — generate with `openssl rand -base64 32`
+- `AUTH_SECRET` (or `NEXTAUTH_SECRET`) — generate with `openssl rand -base64 32`
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD` — initial seeded admin login
 - `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` — from Stripe dashboard (use test keys)
 - `STRIPE_WEBHOOK_SECRET` — from Stripe CLI or dashboard
-- SMTP settings for email (optional for local dev)
+- SMTP settings for email broadcasts:
+  - `SMTP_HOST`
+  - `SMTP_PORT`
+  - `SMTP_USER`
+  - `SMTP_PASS`
+  - `EMAIL_FROM`
 
 ### 3. Set up database
 
 ```bash
 npx prisma generate       # Generate Prisma client
-npx prisma db push        # Push schema to database
+npm run db:migrate        # Create/apply migrations
 npm run db:seed           # Seed initial data (membership year + settings)
 ```
 
@@ -88,7 +94,17 @@ See [docs/architecture.md](docs/architecture.md) for the full technical design.
 
 ## Stripe Setup (for development)
 
-1. Install the [Stripe CLI](https://stripe.com/docs/stripe-cli).
-2. Run `stripe listen --forward-to localhost:3000/api/webhooks/stripe`.
-3. Copy the webhook signing secret to `STRIPE_WEBHOOK_SECRET` in `.env`.
-4. Use [Stripe test cards](https://stripe.com/docs/testing) for payments.
+1. Set `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, and `STRIPE_WEBHOOK_SECRET` in `.env`.
+2. In Stripe Dashboard, add a webhook endpoint pointing to:
+   - `https://<your-domain>/api/webhooks/stripe`
+   - Local dev: `http://localhost:3000/api/webhooks/stripe`
+3. Subscribe to at least:
+   - `checkout.session.completed`
+   - `payment_intent.payment_failed`
+4. For local testing, run Stripe CLI:
+
+```bash
+stripe listen --forward-to localhost:3000/api/webhooks/stripe
+```
+
+5. Use [Stripe test cards](https://stripe.com/docs/testing) for payments.
