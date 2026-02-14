@@ -157,6 +157,7 @@ Windows note: if entrypoint fails with `^M`, Git line endings are wrong for shel
 |---|---|
 | `/` | Home page |
 | `/admin` | Admin dashboard (auth required) |
+| `/admin/members/import` | Admin CSV member import (preview + confirm) |
 | `/api/health` | Health check endpoint (JSON) |
 
 ## Architecture
@@ -181,3 +182,29 @@ stripe listen --forward-to localhost:3000/api/webhooks/stripe
 If the app is running in Docker Desktop, this still works because port `3000` is mapped to the container.
 
 5. Use [Stripe test cards](https://stripe.com/docs/testing) for payments.
+
+## Admin Member CSV Import
+
+Admins can import members at `/admin/members/import` using a preview-first flow.
+
+- Upload CSV and preview parsed rows before import.
+- Invalid rows are reported and skipped.
+- `role=ADMIN` is rejected to prevent privilege escalation.
+- Default behavior is idempotent upsert by email.
+
+Supported headers are case-insensitive and accept common aliases:
+
+- Required: `email`
+- Name: `name` or `firstName` + `lastName`
+- Optional: `phone`, `address`, `city`, `state`, `zip`, `dateOfBirth`, `isDisabledVeteran`, `status`, `role`
+- `dateOfBirth` format: `YYYY-MM-DD` or `MM/DD/YYYY`
+- `isDisabledVeteran`: `true/false`, `yes/no`, `1/0`
+- `status`: `ACTIVE`, `INACTIVE`, `PENDING`
+
+Example file: `docs/examples/members.sample.csv`
+
+```csv
+email,firstName,lastName,phone,address,city,state,zip,dateOfBirth,isDisabledVeteran,status
+alice@example.com,Alice,Carson,859-555-1000,101 Oak St,Mount Sterling,KY,40353,1958-03-14,yes,ACTIVE
+bob@example.com,Bob,King,859-555-1001,202 Pine Rd,Mount Sterling,KY,40353,07/22/1989,no,INACTIVE
+```
