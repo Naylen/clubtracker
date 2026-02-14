@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.mcfgcinc.com)",
+      "Bash(git checkout:*)",
+      "Bash(npm install)",
+      "Bash(where:*)",
+      "Bash(where npm)",
+      "Bash(cmd.exe /c \"where node 2>&1 & where npm 2>&1 & where npx 2>&1\")",
+      "Bash(powershell.exe -Command \"Get-Command node -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source; Get-Command npm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(docker:*)"
+    ]
+  }
+}
