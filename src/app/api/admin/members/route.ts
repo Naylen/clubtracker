@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { validateDisciplineInterests } from "@/lib/discipline";
+import { secureDlNumber } from "@/lib/dl-security";
 import { isSeniorFromDob } from "@/lib/membership-dates";
 import { hashPassword } from "@/lib/password";
+import { createAuditLog } from "@/services/audit";
 
 function parseDate(value: unknown): Date | null {
   if (typeof value !== "string" || !value.trim()) {
@@ -33,7 +36,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!requireAdmin(request)) {
+  const adminUser = requireAdmin(request);
+  if (!adminUser) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -45,6 +49,11 @@ export async function POST(request: NextRequest) {
     address?: string | null;
     dob?: string | null;
     isDisabledVeteran?: boolean;
+    emergencyContactName?: string | null;
+    emergencyContactPhone?: string | null;
+    emergencyContactRelationship?: string | null;
+    disciplineInterests?: unknown;
+    dlNumber?: string | null;
   };
 
   if (!body.name || !body.email || !body.password) {
@@ -55,6 +64,18 @@ export async function POST(request: NextRequest) {
   }
 
   const dob = parseDate(body.dob ?? null);
+  const disciplines = validateDisciplineInterests(body.disciplineInterests);
+  if (disciplines.invalidValues.length > 0) {
+    return NextResponse.json(
+      {
+        error: `Invalid discipline values: ${disciplines.invalidValues.join(", ")}`,
+      },
+      { status: 400 }
+    );
+  }
+
+  const dlNumberRaw = body.dlNumber?.trim();
+  const secureDlFields = dlNumberRaw ? secureDlNumber(dlNumberRaw) : null;
 
   const member = await prisma.member.create({
     data: {
@@ -67,9 +88,25 @@ export async function POST(request: NextRequest) {
       isDisabledVeteran: body.isDisabledVeteran === true,
       isSenior: isSeniorFromDob(dob),
       isActive: true,
+      emergencyContactName: body.emergencyContactName?.trim() || null,
+      emergencyContactPhone: body.emergencyContactPhone?.trim() || null,
+      emergencyContactRelationship: body.emergencyContactRelationship?.trim() || null,
+      disciplineInterests: disciplines.values,
+      ...(secureDlFields ?? {}),
       role: "MEMBER",
     },
   });
+
+  if (secureDlFields) {
+    await createAuditLog({
+      action: "MEMBER_DL_UPDATED",
+      actorMemberId: adminUser.memberId,
+      targetMemberId: member.id,
+      meta: {
+        via: "api.admin.members.create",
+      },
+    });
+  }
 
   return NextResponse.json({ member }, { status: 201 });
 }

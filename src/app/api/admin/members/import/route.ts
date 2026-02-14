@@ -37,126 +37,136 @@ function parseImportOptions(formData: FormData): MemberImportOptions {
 }
 
 export async function POST(request: NextRequest) {
-  const user = getUserFromRequest(request);
-  if (!user || user.role !== "ADMIN") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  try {
+    const user = getUserFromRequest(request);
+    if (!user || user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
-  const formData = await request.formData();
-  const file = formData.get("file");
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "CSV file is required." }, { status: 400 });
-  }
+    const formData = await request.formData();
+    const file = formData.get("file");
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "CSV file is required." }, { status: 400 });
+    }
 
-  const mode = String(formData.get("mode") ?? "preview").trim().toLowerCase();
-  if (mode !== "preview" && mode !== "import") {
-    return NextResponse.json({ error: "mode must be preview or import." }, { status: 400 });
-  }
+    const mode = String(formData.get("mode") ?? "preview").trim().toLowerCase();
+    if (mode !== "preview" && mode !== "import") {
+      return NextResponse.json({ error: "mode must be preview or import." }, { status: 400 });
+    }
 
-  const options = parseImportOptions(formData);
-  const csvText = await file.text();
-  const prepared = prepareMemberCsvImport(csvText, options);
+    const options = parseImportOptions(formData);
+    const csvText = await file.text();
+    const prepared = prepareMemberCsvImport(csvText, options);
 
-  const previewRows = prepared.rows.slice(0, IMPORT_PREVIEW_LIMIT).map((row) => ({
-    rowNumber: row.rowNumber,
-    email: row.email,
-    name: row.name,
-    isActive: row.isActive,
-    errors: row.errors,
-  }));
+    const previewRows = prepared.rows.slice(0, IMPORT_PREVIEW_LIMIT).map((row) => ({
+      rowNumber: row.rowNumber,
+      email: row.email,
+      name: row.name,
+      isActive: row.isActive,
+      errors: row.errors,
+    }));
 
-  if (mode === "preview") {
+    if (mode === "preview") {
+      return NextResponse.json({
+        mode,
+        filename: file.name,
+        headers: prepared.headers,
+        options,
+        totals: {
+          rows: prepared.rows.length,
+          validRows: prepared.rows.length - prepared.errors.length,
+          errors: prepared.errors.length,
+        },
+        errors: prepared.errors,
+        preview: previewRows,
+      });
+    }
+
+    const result = await importPreparedMemberRows({
+      prepared,
+      options,
+      filename: file.name,
+      actor: {
+        memberId: user.memberId,
+        email: user.email,
+      },
+      repo: {
+        findMemberByEmail: (email) =>
+          prisma.member.findUnique({
+            where: { email },
+            select: { id: true },
+          }),
+        createMember: (data) => prisma.member.create({ data, select: { id: true } }),
+        updateMember: (memberId, data) =>
+          prisma.member.update({
+            where: { id: memberId },
+            data,
+            select: { id: true },
+          }),
+        ensureCurrentMembershipYear: () =>
+          createOrOpenCurrentYear().then((membershipYear) => ({
+            id: membershipYear.id,
+            year: membershipYear.year,
+          })),
+        findEnrollment: (memberId, membershipYearId) =>
+          prisma.membershipEnrollment.findUnique({
+            where: {
+              memberId_membershipYearId: {
+                memberId,
+                membershipYearId,
+              },
+            },
+            select: { id: true },
+          }),
+        createEnrollment: (data) =>
+          prisma.membershipEnrollment.create({
+            data,
+            select: { id: true },
+          }),
+        createImportAuditLog: async (audit) => {
+          await prisma.communicationLog.create({
+            data: {
+              memberId: audit.actorMemberId,
+              channel: "EMAIL",
+              toAddress: audit.actorEmail,
+              subject: "MEMBERS_CSV_IMPORT",
+              bodyPreview: `Imported ${audit.totals.rows} CSV rows`,
+              sentAt: new Date(),
+              meta: {
+                action: "MEMBERS_CSV_IMPORT",
+                filename: audit.filename,
+                options: audit.options,
+                totals: audit.totals,
+                rowErrors: audit.rowErrors,
+                importedAt: new Date().toISOString(),
+              },
+            },
+          });
+          console.info("MEMBERS_CSV_IMPORT", {
+            actor: audit.actorEmail,
+            filename: audit.filename,
+            totals: audit.totals,
+          });
+        },
+      },
+    });
+
     return NextResponse.json({
       mode,
       filename: file.name,
       headers: prepared.headers,
       options,
-      totals: {
-        rows: prepared.rows.length,
-        validRows: prepared.rows.length - prepared.errors.length,
-        errors: prepared.errors.length,
-      },
-      errors: prepared.errors,
+      totals: result.totals,
+      errors: result.errors,
       preview: previewRows,
     });
-  }
-
-  const result = await importPreparedMemberRows({
-    prepared,
-    options,
-    filename: file.name,
-    actor: {
-      memberId: user.memberId,
-      email: user.email,
-    },
-    repo: {
-      findMemberByEmail: (email) =>
-        prisma.member.findUnique({
-          where: { email },
-          select: { id: true },
-        }),
-      createMember: (data) => prisma.member.create({ data, select: { id: true } }),
-      updateMember: (memberId, data) =>
-        prisma.member.update({
-          where: { id: memberId },
-          data,
-          select: { id: true },
-        }),
-      ensureCurrentMembershipYear: () =>
-        createOrOpenCurrentYear().then((membershipYear) => ({
-          id: membershipYear.id,
-          year: membershipYear.year,
-        })),
-      findEnrollment: (memberId, membershipYearId) =>
-        prisma.membershipEnrollment.findUnique({
-          where: {
-            memberId_membershipYearId: {
-              memberId,
-              membershipYearId,
-            },
-          },
-          select: { id: true },
-        }),
-      createEnrollment: (data) =>
-        prisma.membershipEnrollment.create({
-          data,
-          select: { id: true },
-        }),
-      createImportAuditLog: async (audit) => {
-        await prisma.communicationLog.create({
-          data: {
-            memberId: audit.actorMemberId,
-            channel: "EMAIL",
-            toAddress: audit.actorEmail,
-            subject: "MEMBERS_CSV_IMPORT",
-            bodyPreview: `Imported ${audit.totals.rows} CSV rows`,
-            sentAt: new Date(),
-            meta: {
-              action: "MEMBERS_CSV_IMPORT",
-              filename: audit.filename,
-              options: audit.options,
-              totals: audit.totals,
-              rowErrors: audit.rowErrors,
-              importedAt: new Date().toISOString(),
-            },
-          },
-        });
-        console.info("MEMBERS_CSV_IMPORT", {
-          actor: audit.actorEmail,
-          filename: audit.filename,
-          totals: audit.totals,
-        });
+  } catch (error) {
+    console.error("Member CSV import failed", error);
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Unexpected import error.",
       },
-    },
-  });
-
-  return NextResponse.json({
-    mode,
-    filename: file.name,
-    headers: prepared.headers,
-    options,
-    totals: result.totals,
-    errors: result.errors,
-    preview: previewRows,
-  });
+      { status: 500 }
+    );
+  }
 }

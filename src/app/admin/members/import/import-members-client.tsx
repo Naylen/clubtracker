@@ -33,6 +33,18 @@ type ImportResponse = {
   preview: ImportPreviewRow[];
 };
 
+function parseJsonSafe<T>(raw: string): T | null {
+  if (!raw.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
 export function ImportMembersClient() {
   const [file, setFile] = useState<File | null>(null);
   const [upsertByEmail, setUpsertByEmail] = useState(true);
@@ -81,9 +93,16 @@ export function ImportMembersClient() {
         body: formData,
       });
 
-      const body = (await response.json()) as ImportResponse & { error?: string };
+      const rawResponse = await response.text();
+      const body = parseJsonSafe<ImportResponse & { error?: string }>(rawResponse);
       if (!response.ok) {
-        throw new Error(body.error ?? "Import request failed.");
+        throw new Error(
+          body?.error ?? `Import request failed (HTTP ${response.status}).`
+        );
+      }
+
+      if (!body) {
+        throw new Error("Import endpoint returned an empty response.");
       }
 
       if (mode === "preview") {
