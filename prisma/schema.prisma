@@ -33,6 +33,13 @@ enum CommunicationChannel {
   EMAIL
 }
 
+enum MemberDiscipline {
+  ARCHERY
+  PISTOL
+  RIFLE
+  TRAP
+}
+
 model Member {
   id                String                 @id @default(uuid())
   name              String
@@ -44,6 +51,14 @@ model Member {
   isDisabledVeteran Boolean                @default(false)
   isSenior          Boolean                @default(false)
   isActive          Boolean                @default(true)
+  emergencyContactName String?
+  emergencyContactPhone String?
+  emergencyContactRelationship String?
+  disciplineInterests MemberDiscipline[] @default([])
+  dlNumberHash      String?
+  dlNumberCiphertext String?
+  dlNumberIv        String?
+  dlNumberAuthTag   String?
   role              Role                   @default(MEMBER)
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
@@ -52,6 +67,8 @@ model Member {
   enrollments       MembershipEnrollment[]
   payments          Payment[]
   communicationLogs CommunicationLog[]
+  authoredAuditLogs AuditLog[]             @relation("AuditActor")
+  targetedAuditLogs AuditLog[]             @relation("AuditTarget")
 }
 
 model HouseholdMember {
@@ -76,7 +93,11 @@ model MembershipYear {
   endsAt         DateTime
   renewalOpensAt DateTime
   renewalDueAt   DateTime
-  capacity       Int      @default(350)
+  membershipCap  Int      @default(350) @map("capacity")
+  standardPriceCents Int  @default(15000)
+  discountPriceCents Int  @default(10000)
+  signupDate     DateTime?
+  signupEnabled  Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -144,4 +165,20 @@ model SystemSettings {
   value     Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  action         String
+  actorMemberId  String?
+  targetMemberId String?
+  meta           Json?
+  createdAt      DateTime @default(now())
+
+  actorMember  Member? @relation("AuditActor", fields: [actorMemberId], references: [id], onDelete: SetNull)
+  targetMember Member? @relation("AuditTarget", fields: [targetMemberId], references: [id], onDelete: SetNull)
+
+  @@index([actorMemberId])
+  @@index([targetMemberId])
+  @@index([action, createdAt])
 }

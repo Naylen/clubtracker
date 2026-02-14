@@ -37,7 +37,8 @@ export default async function MemberPortalPage() {
       })
     : null;
 
-  const price = member ? getRenewalPriceForMember(member) : null;
+  const price =
+    member && membershipYear ? getRenewalPriceForMember(member, membershipYear) : null;
   const lateRenewalPolicy = await getLateRenewalPolicy();
   const renewalBlocked = membershipYear
     ? await isRenewalBlockedByLatePolicy({ membershipYear })

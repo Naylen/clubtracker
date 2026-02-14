@@ -27,10 +27,14 @@ async function main() {
 
   await prisma.membershipYear.upsert({
     where: { year: currentYear },
-    update: dates,
+    update: {},
     create: {
       year: currentYear,
-      capacity: 350,
+      membershipCap: 350,
+      standardPriceCents: 15000,
+      discountPriceCents: 10000,
+      signupDate: new Date(`${currentYear}-02-01T09:00:00-05:00`),
+      signupEnabled: true,
       ...dates,
     },
   });

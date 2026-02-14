@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const pricing = getRenewalPriceForMember(member);
+  const pricing = getRenewalPriceForMember(member, membershipYear);
   const successUrl = `${request.nextUrl.origin}/pay/success?session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${request.nextUrl.origin}/pay/cancel`;
 

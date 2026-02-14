@@ -17,6 +17,7 @@ export default async function AdminLayout({
               Admin Dashboard
             </Link>
             <Link href="/admin/members">Member Roster</Link>
+            <Link href="/admin/settings">Settings</Link>
             <Link href="/admin/payments">Payments</Link>
             <Link href="/admin/communications">Communications</Link>
             <Link href="/portal">Member Portal</Link>

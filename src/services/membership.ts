@@ -6,9 +6,9 @@ import {
   isSeniorFromDob,
 } from "@/lib/membership-dates";
 
-export const MEMBERSHIP_CAP = 350;
-export const STANDARD_RENEWAL_PRICE_CENTS = 15000;
-export const DISCOUNT_RENEWAL_PRICE_CENTS = 10000;
+export const DEFAULT_MEMBERSHIP_CAP = 350;
+export const DEFAULT_STANDARD_RENEWAL_PRICE_CENTS = 15000;
+export const DEFAULT_DISCOUNT_RENEWAL_PRICE_CENTS = 10000;
 const ACCEPT_LATE_RENEWALS_KEY = "acceptLateRenewals";
 
 export type LateRenewalPolicy = {
@@ -19,11 +19,15 @@ export type LateRenewalPolicy = {
 export type RenewalDiscountReason = "DISABLED_VETERAN" | "AGE_65_PLUS" | null;
 
 export function getRenewalPriceForMember(
-  member: Pick<Member, "isDisabledVeteran" | "isSenior" | "dob">
+  member: Pick<Member, "isDisabledVeteran" | "isSenior" | "dob">,
+  membershipYear?: Pick<MembershipYear, "standardPriceCents" | "discountPriceCents">
 ): { amountCents: number; discountReason: RenewalDiscountReason } {
+  const standardPrice = membershipYear?.standardPriceCents ?? DEFAULT_STANDARD_RENEWAL_PRICE_CENTS;
+  const discountPrice = membershipYear?.discountPriceCents ?? DEFAULT_DISCOUNT_RENEWAL_PRICE_CENTS;
+
   if (member.isDisabledVeteran) {
     return {
-      amountCents: DISCOUNT_RENEWAL_PRICE_CENTS,
+      amountCents: discountPrice,
       discountReason: "DISABLED_VETERAN",
     };
   }
@@ -31,13 +35,13 @@ export function getRenewalPriceForMember(
   const seniorEligible = member.isSenior || isSeniorFromDob(member.dob);
   if (seniorEligible) {
     return {
-      amountCents: DISCOUNT_RENEWAL_PRICE_CENTS,
+      amountCents: discountPrice,
       discountReason: "AGE_65_PLUS",
     };
   }
 
   return {
-    amountCents: STANDARD_RENEWAL_PRICE_CENTS,
+    amountCents: standardPrice,
     discountReason: null,
   };
 }
@@ -76,17 +80,33 @@ export async function getLateRenewalPolicy(): Promise<LateRenewalPolicy> {
 
 export async function createOrOpenCurrentYear(asOf = new Date()) {
   const year = getCurrentYearInNewYork(asOf);
-  const dates = buildMembershipYearDates(year);
+  return createOrOpenMembershipYear(year);
+}
 
-  const membershipYear = await prisma.membershipYear.upsert({
+export async function createOrOpenMembershipYear(year: number) {
+  const dates = buildMembershipYearDates(year);
+  const defaultSignupDate = new Date(`${year}-02-01T09:00:00-05:00`);
+
+  let membershipYear = await prisma.membershipYear.upsert({
     where: { year },
-    update: dates,
+    update: {},
     create: {
       year,
-      capacity: MEMBERSHIP_CAP,
+      membershipCap: DEFAULT_MEMBERSHIP_CAP,
+      standardPriceCents: DEFAULT_STANDARD_RENEWAL_PRICE_CENTS,
+      discountPriceCents: DEFAULT_DISCOUNT_RENEWAL_PRICE_CENTS,
+      signupDate: defaultSignupDate,
+      signupEnabled: true,
       ...dates,
     },
   });
+
+  if (!membershipYear.signupDate) {
+    membershipYear = await prisma.membershipYear.update({
+      where: { id: membershipYear.id },
+      data: { signupDate: defaultSignupDate },
+    });
+  }
 
   await prisma.systemSettings.upsert({
     where: { key: ACCEPT_LATE_RENEWALS_KEY },
@@ -132,7 +152,7 @@ export async function getCapacityRemaining(year: number): Promise<number> {
   }
 
   const activeCount = await countActiveEnrollments(membershipYear.id);
-  return Math.max(0, membershipYear.capacity - activeCount);
+  return Math.max(0, membershipYear.membershipCap - activeCount);
 }
 
 export async function expirePendingRenewalsIfPastDue(
@@ -216,7 +236,7 @@ export async function recordMembershipPayment(input: {
     });
 
     const memberAlreadyActive = currentEnrollment?.status === "ACTIVE";
-    if (!memberAlreadyActive && activeEnrollments >= membershipYear.capacity) {
+    if (!memberAlreadyActive && activeEnrollments >= membershipYear.membershipCap) {
       throw new Error("Membership capacity reached for this year.");
     }
 

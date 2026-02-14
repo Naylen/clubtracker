@@ -14,6 +14,7 @@ export default async function AdminDashboardPage() {
     await requireAdmin("/admin");
     await createOrOpenCurrentYear();
     revalidatePath("/admin");
+    revalidatePath("/admin/settings");
     revalidatePath("/portal");
   }
 
@@ -35,7 +36,7 @@ export default async function AdminDashboardPage() {
   ]);
 
   const capacityRemaining = membershipYear
-    ? Math.max(0, membershipYear.capacity - activeEnrollments)
+    ? Math.max(0, membershipYear.membershipCap - activeEnrollments)
     : 0;
 
   return (
