@@ -37,6 +37,7 @@ Edit `.env` with your values:
 - `DATABASE_URL` — your Postgres connection string
 - `AUTH_SECRET` (or `NEXTAUTH_SECRET`) — generate with `openssl rand -base64 32`
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — initial seeded admin login
+- `DL_ENCRYPTION_KEY` — 32-byte key for encrypted driver-license storage (base64 or 64-char hex)
 - `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` — from Stripe dashboard (use test keys)
 - `STRIPE_WEBHOOK_SECRET` — from Stripe CLI or dashboard
 - SMTP settings for email broadcasts:
@@ -157,6 +158,7 @@ Windows note: if entrypoint fails with `^M`, Git line endings are wrong for shel
 |---|---|
 | `/` | Home page |
 | `/admin` | Admin dashboard (auth required) |
+| `/admin/settings` | Membership year settings (admin only) |
 | `/admin/members/import` | Admin CSV member import (preview + confirm) |
 | `/api/health` | Health check endpoint (JSON) |
 

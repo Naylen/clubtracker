@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/stripe", () => ({
-  stripe: {
+  getStripeClient: vi.fn(() => ({
     webhooks: {
       constructEvent: vi.fn(() => {
         throw new Error("invalid signature");
       }),
     },
-  },
+  })),
 }));
 
 describe("Stripe webhook route", () => {
