@@ -62,7 +62,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Docker Desktop (Dev)
+## Docker Desktop (Dev - Default)
 
 ### 1. Create local env file
 
@@ -72,58 +72,61 @@ cp .env.example .env
 
 Use safe local values in `.env` (never commit real secrets).
 
-### 2. Start app + Postgres (dev profile)
+### 2. Start app + Postgres (default)
 
 ```bash
-docker compose --profile dev up --build
+docker compose up --build -d
 ```
 
-- App: `http://localhost:3000`
+- Dev app: `http://localhost:3000`
 - Postgres: `localhost:5432`
 
-The app container uses Docker Compose networking, so `DATABASE_URL` points to `db` internally.
-
-### 3. Run Prisma migrations in-container
-
-Run this once after containers are up:
+### 3. Run Prisma migration + seed in dev container
 
 ```bash
-docker compose --profile dev exec app npm run db:migrate
+docker compose exec app npx prisma migrate deploy
+docker compose exec app npx prisma db seed
 ```
 
-Optional seed:
-
-```bash
-docker compose --profile dev exec app npm run db:seed
-```
-
-### 4. Verify health endpoint
-
-```bash
-curl http://localhost:3000/api/health
-```
-
-### 5. Stop and clean up
-
-```bash
-docker compose down
-```
-
-Remove database volume too:
-
-```bash
-docker compose down -v
-```
-
-Windows note: if an entrypoint fails with `^M`, ensure Git is not converting shell scripts to CRLF. This repo includes `.gitattributes` to enforce LF for `.sh`, Dockerfile, and compose files.
+Seed requires an up-to-date schema, so run migrations first.
 
 ## Docker (Prod-like)
 
-Use the production target (runs `next start` and executes `prisma migrate deploy` in entrypoint):
+### 1. Start prod profile
 
 ```bash
-docker compose --profile prod up --build
+docker compose --profile prod up --build -d
 ```
+
+This starts the prod container as `app-prod` (exposed at `http://localhost:3001`) and Postgres.
+The prod entrypoint runs `prisma migrate deploy` automatically when the app container starts.
+If you want only prod services in this mode, run:
+
+```bash
+docker compose --profile prod up --build -d db app-prod
+```
+
+### 2. Run Prisma migration + seed in prod container
+
+```bash
+docker compose --profile prod exec app-prod npx prisma migrate deploy
+docker compose --profile prod exec app-prod npx prisma db seed
+```
+
+## Reset DB
+
+```bash
+# dev/default
+docker compose down -v
+
+# prod profile
+docker compose --profile prod down -v
+```
+
+Guardrail: if `docker compose ps` shows only `db`, you started the wrong command/service (for example `docker compose up db`). Use full stack commands above.
+`prisma db seed` requires migrations first and an app container (`app` or `app-prod`) to execute in.
+
+Windows note: if entrypoint fails with `^M`, Git line endings are wrong for shell files. `.gitattributes` in this repo enforces LF for `.sh`, Dockerfile, and compose YAML files.
 
 ## Available Commands
 
