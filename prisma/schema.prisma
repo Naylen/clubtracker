@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  PENDING_RENEWAL
+  LAPSED
+}
+
+enum PaymentProvider {
+  STRIPE
+}
+
+enum PaymentStatus {
+  CREATED
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum CommunicationChannel {
+  EMAIL
+}
+
+model Member {
+  id                String                 @id @default(uuid())
+  name              String
+  email             String                 @unique
+  passwordHash      String
+  phone             String?
+  address           String?
+  dob               DateTime?
+  isDisabledVeteran Boolean                @default(false)
+  isSenior          Boolean                @default(false)
+  isActive          Boolean                @default(true)
+  role              Role                   @default(MEMBER)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  householdMembers  HouseholdMember[]
+  enrollments       MembershipEnrollment[]
+  payments          Payment[]
+  communicationLogs CommunicationLog[]
+}
+
+model HouseholdMember {
+  id           String   @id @default(uuid())
+  memberId      String
+  name          String
+  relationship  String
+  dob           DateTime?
+  under18       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+}
+
+model MembershipYear {
+  id             String   @id @default(uuid())
+  year           Int      @unique
+  startsAt       DateTime
+  endsAt         DateTime
+  renewalOpensAt DateTime
+  renewalDueAt   DateTime
+  capacity       Int      @default(350)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  enrollments MembershipEnrollment[]
+  payments    Payment[]
+}
+
+model MembershipEnrollment {
+  id               String           @id @default(uuid())
+  memberId         String
+  membershipYearId String
+  status           EnrollmentStatus @default(PENDING_RENEWAL)
+  renewedAt        DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  member         Member         @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  membershipYear MembershipYear @relation(fields: [membershipYearId], references: [id], onDelete: Cascade)
+  payments       Payment[]
+
+  @@unique([memberId, membershipYearId])
+  @@index([membershipYearId, status])
+}
+
+model Payment {
+  id               String          @id @default(uuid())
+  provider         PaymentProvider @default(STRIPE)
+  amountCents      Int
+  status           PaymentStatus   @default(CREATED)
+  externalId       String?
+  webhookEventId   String?         @unique
+  paidAt           DateTime?
+  memberId         String
+  membershipYearId String
+  enrollmentId     String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  member         Member               @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  membershipYear MembershipYear       @relation(fields: [membershipYearId], references: [id], onDelete: Cascade)
+  enrollment     MembershipEnrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+
+  @@index([memberId, membershipYearId])
+}
+
+model CommunicationLog {
+  id          String               @id @default(uuid())
+  channel     CommunicationChannel @default(EMAIL)
+  toAddress   String
+  subject     String?
+  bodyPreview String
+  sentAt      DateTime             @default(now())
+  memberId    String?
+  meta        Json?
+  createdAt   DateTime             @default(now())
+
+  member Member? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@index([memberId])
+}
+
+model SystemSettings {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: mcfgc
+      POSTGRES_PASSWORD: mcfgc_dev
+      POSTGRES_DB: mcfgc
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcfgc"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://mcfgc:mcfgc_dev@db:5432/mcfgc?schema=public"
+      NEXTAUTH_URL: "http://localhost:3000"
+      NEXTAUTH_SECRET: "docker-dev-secret-not-for-production"
+      STRIPE_SECRET_KEY: "sk_test_placeholder"
+      STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder"
+      STRIPE_WEBHOOK_SECRET: "whsec_placeholder"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+
+volumes:
+  pgdata:
