@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -114,7 +115,12 @@ export default async function AdminMembersPage() {
   return (
     <div className="space-y-8">
       <section className="rounded border bg-white p-6">
-        <h1 className="mb-4 text-2xl font-bold">Member Roster</h1>
+        <div className="mb-4 flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Member Roster</h1>
+          <Link className="text-sm font-medium underline" href="/admin/members/import">
+            Import from CSV
+          </Link>
+        </div>
         <form action={createMemberAction} className="grid gap-3 sm:grid-cols-2">
           <input className="rounded border p-2" name="name" placeholder="Full name" required />
           <input
