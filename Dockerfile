@@ -1,19 +1,35 @@
-FROM node:20-alpine
+FROM node:20-alpine AS base
 
-RUN apk add --no-cache openssl
-
+RUN apk add --no-cache openssl postgresql-client
 WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
 
-# Install deps first (cached layer)
+FROM base AS deps
+
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-# Copy source
-COPY . .
+FROM deps AS dev
 
-# Generate Prisma client
+COPY prisma ./prisma
 RUN npx prisma generate
-
 EXPOSE 3000
-
 CMD ["npm", "run", "dev"]
+
+FROM deps AS builder
+
+COPY . .
+RUN npx prisma generate && npm run build
+
+FROM base AS prod
+
+RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
+
+COPY --from=builder /app /app
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && chown -R nextjs:nodejs /app
+
+USER nextjs
+EXPOSE 3000
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["npm", "run", "start"]

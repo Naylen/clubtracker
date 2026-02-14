@@ -62,6 +62,73 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Run with Docker Desktop
+
+### 1. Create local env file
+
+```bash
+cp .env.example .env
+```
+
+Use safe local values in `.env` (never commit real secrets).
+
+### 2. Start app + Postgres (dev target)
+
+```bash
+docker compose up --build
+```
+
+- App: `http://localhost:3000`
+- Postgres: `localhost:5432`
+
+The app container uses Docker Compose networking, so `DATABASE_URL` points to `db` internally.
+
+### 3. Run Prisma migrations in-container
+
+Run this once after containers are up:
+
+```bash
+docker compose exec app npm run db:migrate
+```
+
+For production-style migration command:
+
+```bash
+docker compose exec app npm run db:migrate:deploy
+```
+
+Optional seed:
+
+```bash
+docker compose exec app npm run db:seed
+```
+
+### 4. Verify health endpoint
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+### 5. Stop and clean up
+
+```bash
+docker compose down
+```
+
+Remove database volume too:
+
+```bash
+docker compose down -v
+```
+
+### Production image target
+
+Use the production target (runs `next start` and executes `prisma migrate deploy` in entrypoint):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+```
+
 ## Available Commands
 
 | Command | Description |
@@ -77,8 +144,13 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run db:generate` | Regenerate Prisma client |
 | `npm run db:push` | Push schema changes to DB |
 | `npm run db:migrate` | Create and run migrations |
+| `npm run db:migrate:deploy` | Apply existing migrations (deploy-safe) |
 | `npm run db:seed` | Seed database |
 | `npm run db:studio` | Open Prisma Studio (DB GUI) |
+| `npm run docker:dev` | Docker Compose dev up/build |
+| `npm run docker:prod` | Docker Compose prod target up/build |
+| `npm run docker:down` | Docker Compose down |
+| `npm run docker:down:volumes` | Docker Compose down and remove volumes |
 
 ## Key Routes
 
@@ -106,5 +178,7 @@ See [docs/architecture.md](docs/architecture.md) for the full technical design.
 ```bash
 stripe listen --forward-to localhost:3000/api/webhooks/stripe
 ```
+
+If the app is running in Docker Desktop, this command still works because port `3000` is mapped to the container.
 
 5. Use [Stripe test cards](https://stripe.com/docs/testing) for payments.

@@ -1,38 +1,46 @@
 services:
   db:
     image: postgres:15-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: mcfgc
-      POSTGRES_PASSWORD: mcfgc_dev
-      POSTGRES_DB: mcfgc
+      POSTGRES_USER: ${POSTGRES_USER:-clubtracker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-clubtracker_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-clubtracker}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mcfgc"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-clubtracker} -d ${POSTGRES_DB:-clubtracker}"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 20
 
   app:
-    build: .
-    ports:
-      - "3000:3000"
+    build:
+      context: .
+      target: dev
+    restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: "postgresql://mcfgc:mcfgc_dev@db:5432/mcfgc?schema=public"
-      NEXTAUTH_URL: "http://localhost:3000"
-      NEXTAUTH_SECRET: "docker-dev-secret-not-for-production"
-      STRIPE_SECRET_KEY: "sk_test_placeholder"
-      STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder"
-      STRIPE_WEBHOOK_SECRET: "whsec_placeholder"
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clubtracker}:${POSTGRES_PASSWORD:-clubtracker_dev_password}@db:5432/${POSTGRES_DB:-clubtracker}?schema=public
+      NEXTAUTH_URL: http://localhost:3000
     depends_on:
       db:
         condition: service_healthy
+    ports:
+      - "3000:3000"
     volumes:
       - .:/app
-      - /app/node_modules
-      - /app/.next
+      - app_node_modules:/app/node_modules
+      - app_next:/app/.next
+    command: >
+      sh -c "if [ ! -d node_modules ] || [ -z \"$(ls -A node_modules 2>/dev/null)\" ];
+      then npm install; fi && npm run dev"
 
 volumes:
   pgdata:
+  app_node_modules:
+  app_next:

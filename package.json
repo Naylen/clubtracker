@@ -14,8 +14,13 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "docker:dev": "docker compose up --build",
+    "docker:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build",
+    "docker:down": "docker compose down",
+    "docker:down:volumes": "docker compose down -v"
   },
   "dependencies": {
     "next": "^14.2.0",

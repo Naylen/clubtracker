@@ -1,0 +1,11 @@
+services:
+  app:
+    build:
+      context: .
+      target: prod
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clubtracker}:${POSTGRES_PASSWORD:-clubtracker_dev_password}@db:5432/${POSTGRES_DB:-clubtracker}?schema=public
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      SEED_ON_START: ${SEED_ON_START:-false}
+    volumes: []
