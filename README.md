@@ -62,7 +62,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Run with Docker Desktop
+## Docker Desktop (Dev)
 
 ### 1. Create local env file
 
@@ -72,10 +72,10 @@ cp .env.example .env
 
 Use safe local values in `.env` (never commit real secrets).
 
-### 2. Start app + Postgres (dev target)
+### 2. Start app + Postgres (dev profile)
 
 ```bash
-docker compose up --build
+docker compose --profile dev up --build
 ```
 
 - App: `http://localhost:3000`
@@ -88,19 +88,13 @@ The app container uses Docker Compose networking, so `DATABASE_URL` points to `d
 Run this once after containers are up:
 
 ```bash
-docker compose exec app npm run db:migrate
-```
-
-For production-style migration command:
-
-```bash
-docker compose exec app npm run db:migrate:deploy
+docker compose --profile dev exec app npm run db:migrate
 ```
 
 Optional seed:
 
 ```bash
-docker compose exec app npm run db:seed
+docker compose --profile dev exec app npm run db:seed
 ```
 
 ### 4. Verify health endpoint
@@ -121,12 +115,14 @@ Remove database volume too:
 docker compose down -v
 ```
 
-### Production image target
+Windows note: if an entrypoint fails with `^M`, ensure Git is not converting shell scripts to CRLF. This repo includes `.gitattributes` to enforce LF for `.sh`, Dockerfile, and compose files.
+
+## Docker (Prod-like)
 
 Use the production target (runs `next start` and executes `prisma migrate deploy` in entrypoint):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+docker compose --profile prod up --build
 ```
 
 ## Available Commands
@@ -179,6 +175,6 @@ See [docs/architecture.md](docs/architecture.md) for the full technical design.
 stripe listen --forward-to localhost:3000/api/webhooks/stripe
 ```
 
-If the app is running in Docker Desktop, this command still works because port `3000` is mapped to the container.
+If the app is running in Docker Desktop, this still works because port `3000` is mapped to the container.
 
 5. Use [Stripe test cards](https://stripe.com/docs/testing) for payments.
