@@ -3,11 +3,10 @@ import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import {
-  calculateAgeOnDate,
-  determineSignupDay,
-  isSeniorOnDate,
-} from "@/lib/membership-dates";
+import { determineSignupDay, isSeniorOnDate } from "@/lib/membership-dates";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { deriveApplicationReviewState } from "@/services/application-review";
 import { createAuditLog } from "@/services/audit";
 
 type SearchParams = {
@@ -20,6 +19,19 @@ function formatCurrency(amountCents: number): string {
     style: "currency",
     currency: "USD",
   }).format(amountCents / 100);
+}
+
+function toneForStatus(status: string): "info" | "success" | "danger" | "neutral" {
+  if (status === "APPROVED") {
+    return "success";
+  }
+  if (status === "DENIED") {
+    return "danger";
+  }
+  if (status === "SUBMITTED") {
+    return "info";
+  }
+  return "neutral";
 }
 
 export default async function ApplicationDetailPage({
@@ -71,15 +83,16 @@ export default async function ApplicationDetailPage({
     year: application.membershipYear.year,
     signupDate: application.membershipYear.signupDate,
   });
-  const ageOnSignupDay = application.applicantDob
-    ? calculateAgeOnDate(application.applicantDob, signupDay)
-    : null;
-  const seniorAutoEligible = isSeniorOnDate(application.applicantDob, signupDay);
+  const reviewState = deriveApplicationReviewState({
+    applicantDob: application.applicantDob,
+    signupDay,
+    requestedDisabledVeteranDiscount: application.requestedDisabledVeteranDiscount,
+  });
+  const ageOnSignupDay = reviewState.ageOnSignupDay;
+  const seniorAutoEligible = reviewState.seniorAutoEligible;
 
   const suggestedTier =
-    (seniorAutoEligible ? tierByCode.get("SENIOR") : undefined) ??
-    (application.requestedDisabledVeteranDiscount ? tierByCode.get("DISABLED_VETERAN") : undefined) ??
-    tierByCode.get("STANDARD") ??
+    tierByCode.get(reviewState.suggestedTierCode) ??
     tiers[0] ??
     null;
 
@@ -222,12 +235,15 @@ export default async function ApplicationDetailPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Application Review</h1>
-        <Link className="text-sm font-medium underline" href="/admin/applications">
-          Back to applications
-        </Link>
-      </div>
+      <PageHeader
+        actions={
+          <Link className="rounded border px-3 py-1.5 text-sm font-medium" href="/admin/applications">
+            Back to Applications
+          </Link>
+        }
+        subtitle={`Review and decision workflow for ${application.membershipYear.year}.`}
+        title="Application Review"
+      />
 
       {searchParams.success ? (
         <p className="rounded border border-green-300 bg-green-50 p-3 text-sm text-green-800">
@@ -240,125 +256,136 @@ export default async function ApplicationDetailPage({
         </p>
       ) : null}
 
-      <section className="rounded-xl border bg-white p-5 shadow-sm">
-        <h2 className="text-xl font-semibold">Applicant</h2>
-        <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-          <p>
-            <span className="font-medium">Name:</span> {application.applicantFirstName}{" "}
-            {application.applicantLastName}
-          </p>
-          <p>
-            <span className="font-medium">Email:</span> {application.applicantEmail}
-          </p>
-          <p>
-            <span className="font-medium">Phone:</span> {application.applicantPhone ?? "Not provided"}
-          </p>
-          <p>
-            <span className="font-medium">Address:</span> {application.applicantAddress ?? "Not provided"}
-          </p>
-          <p>
-            <span className="font-medium">DOB:</span>{" "}
-            {application.applicantDob ? application.applicantDob.toLocaleDateString() : "Not provided"}
-          </p>
-          <p>
-            <span className="font-medium">Age on signup day:</span>{" "}
-            {ageOnSignupDay !== null ? ageOnSignupDay : "Unknown"}
-          </p>
-          <p>
-            <span className="font-medium">Signup day ({application.membershipYear.year}):</span>{" "}
-            {signupDay.toLocaleDateString()}
-          </p>
-          <p>
-            <span className="font-medium">Senior auto flag:</span>{" "}
-            {seniorAutoEligible ? "Yes" : "No"}
-          </p>
-          <p>
-            <span className="font-medium">Requested disabled veteran discount:</span>{" "}
-            {application.requestedDisabledVeteranDiscount ? "Yes" : "No"}
-          </p>
-          <p>
-            <span className="font-medium">Current status:</span> {application.status}
-          </p>
-          <p className="sm:col-span-2">
-            <span className="font-medium">Account linked:</span>{" "}
-            {application.createdMember
-              ? `${application.createdMember.email} (${application.createdMember.isActive ? "ACTIVE" : "INACTIVE"})`
-              : "No account linked"}
-          </p>
-        </div>
-      </section>
+      <section className="grid gap-6 lg:grid-cols-5">
+        <article className="rounded-xl border bg-white p-5 shadow-sm lg:col-span-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge tone={toneForStatus(application.status)}>{application.status}</StatusBadge>
+            {application.status === "APPROVED" && application.assignedPricingTier ? (
+              <StatusBadge tone="info">PAYMENT_AVAILABLE</StatusBadge>
+            ) : null}
+            {seniorAutoEligible ? <StatusBadge tone="info">Auto: Senior</StatusBadge> : null}
+          </div>
 
-      <section className="rounded-xl border bg-white p-5 shadow-sm">
-        <h2 className="text-xl font-semibold">Approve</h2>
-        <form action={approveAction} className="mt-4 space-y-4">
-          <input name="applicationId" type="hidden" value={application.id} />
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium">Assigned pricing tier</span>
-            <select
-              className="w-full rounded border p-2 sm:max-w-sm"
-              defaultValue={application.assignedPricingTierId ?? suggestedTier?.id ?? ""}
-              name="assignedPricingTierId"
-              required
-            >
-              <option disabled value="">
-                Select tier
-              </option>
-              {tiers.map((tier) => (
-                <option key={tier.id} value={tier.id}>
-                  {tier.name} ({tier.code}) - {formatCurrency(tier.amountCents)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <h2 className="mt-4 text-xl font-semibold">Applicant Details</h2>
+          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+            <p>
+              <span className="font-medium">Name:</span> {application.applicantFirstName}{" "}
+              {application.applicantLastName}
+            </p>
+            <p>
+              <span className="font-medium">Email:</span> {application.applicantEmail}
+            </p>
+            <p>
+              <span className="font-medium">Phone:</span> {application.applicantPhone ?? "Not provided"}
+            </p>
+            <p>
+              <span className="font-medium">Address:</span> {application.applicantAddress ?? "Not provided"}
+            </p>
+            <p>
+              <span className="font-medium">DOB:</span>{" "}
+              {application.applicantDob ? application.applicantDob.toLocaleDateString() : "Not provided"}
+            </p>
+            <p>
+              <span className="font-medium">Age on Signup Day:</span>{" "}
+              {ageOnSignupDay !== null ? ageOnSignupDay : "Unknown"}
+            </p>
+            <p>
+              <span className="font-medium">Signup Day ({application.membershipYear.year}):</span>{" "}
+              {signupDay.toLocaleDateString()}
+            </p>
+            <p>
+              <span className="font-medium">Requested Disabled Veteran Discount:</span>{" "}
+              {application.requestedDisabledVeteranDiscount ? "Yes" : "No"}
+            </p>
+            <p className="sm:col-span-2">
+              <span className="font-medium">Assigned Tier:</span>{" "}
+              {application.assignedPricingTier
+                ? `${application.assignedPricingTier.name} (${application.assignedPricingTier.code})`
+                : "Not assigned"}
+            </p>
+            <p className="sm:col-span-2">
+              <span className="font-medium">Linked Account:</span>{" "}
+              {application.createdMember
+                ? `${application.createdMember.email} (${application.createdMember.isActive ? "ACTIVE" : "INACTIVE"})`
+                : "No account linked"}
+            </p>
+          </div>
+        </article>
 
-          {application.requestedDisabledVeteranDiscount ? (
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                defaultChecked={application.disabledVeteranApproved ?? false}
-                name="disabledVeteranApproved"
-                type="checkbox"
-              />
-              Disabled veteran discount approved
-            </label>
-          ) : null}
+        <aside className="space-y-6 lg:col-span-2">
+          <section className="rounded-xl border bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-semibold">Decision Panel</h2>
+            <form action={approveAction} className="mt-4 space-y-4">
+              <input name="applicationId" type="hidden" value={application.id} />
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Assigned Pricing Tier</span>
+                <select
+                  className="w-full rounded border p-2"
+                  defaultValue={application.assignedPricingTierId ?? suggestedTier?.id ?? ""}
+                  name="assignedPricingTierId"
+                  required
+                >
+                  <option disabled value="">
+                    Select tier
+                  </option>
+                  {tiers.map((tier) => (
+                    <option key={tier.id} value={tier.id}>
+                      {tier.name} ({tier.code}) - {formatCurrency(tier.amountCents)}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-          {seniorAutoEligible ? (
-            <label className="flex items-center gap-2 text-sm">
-              <input name="confirmSeniorOverride" type="checkbox" />
-              Confirm override if selecting a non-SENIOR tier for a 65+ applicant
-            </label>
-          ) : null}
+              {application.requestedDisabledVeteranDiscount ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    defaultChecked={application.disabledVeteranApproved ?? false}
+                    name="disabledVeteranApproved"
+                    type="checkbox"
+                  />
+                  Disabled veteran discount approved
+                </label>
+              ) : null}
 
-          <button
-            className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-            type="submit"
-          >
-            Approve Application
-          </button>
-        </form>
-      </section>
+              {seniorAutoEligible ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <input name="confirmSeniorOverride" type="checkbox" />
+                  Confirm override when selecting a non-SENIOR tier
+                </label>
+              ) : null}
 
-      <section className="rounded-xl border bg-white p-5 shadow-sm">
-        <h2 className="text-xl font-semibold">Deny</h2>
-        <form action={denyAction} className="mt-4 space-y-4">
-          <input name="applicationId" type="hidden" value={application.id} />
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium">Denial reason</span>
-            <textarea
-              className="w-full rounded border p-2"
-              defaultValue={application.denialReason ?? ""}
-              name="denialReason"
-              required
-              rows={4}
-            />
-          </label>
-          <button
-            className="rounded border border-red-300 px-4 py-2 text-sm font-medium text-red-700"
-            type="submit"
-          >
-            Deny Application
-          </button>
-        </form>
+              <button
+                className="w-full rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white"
+                type="submit"
+              >
+                Approve Application
+              </button>
+            </form>
+          </section>
+
+          <section className="rounded-xl border bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-semibold">Deny</h2>
+            <form action={denyAction} className="mt-4 space-y-4">
+              <input name="applicationId" type="hidden" value={application.id} />
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Denial Reason</span>
+                <textarea
+                  className="w-full rounded border p-2"
+                  defaultValue={application.denialReason ?? ""}
+                  name="denialReason"
+                  required
+                  rows={4}
+                />
+              </label>
+              <button
+                className="w-full rounded border border-red-300 px-4 py-2 text-sm font-medium text-red-700"
+                type="submit"
+              >
+                Deny Application
+              </button>
+            </form>
+          </section>
+        </aside>
       </section>
 
       {application.reviewedAt ? (

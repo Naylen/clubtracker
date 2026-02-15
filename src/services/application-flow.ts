@@ -1,7 +1,9 @@
 import { ApplicationStatus, MemberStatus, type MembershipYear } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { parseDisciplineInterests } from "@/lib/discipline";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { hashPassword } from "@/lib/password";
+import { getApplicationWindow, isApplicationOpenNow } from "@/services/operations-state";
 
 export class ApplicationFlowError extends Error {
   code: "APPLICATIONS_CLOSED" | "ACTIVE_MEMBER_EXISTS" | "ACCOUNT_EXISTS" | "ACCOUNT_NOT_FOUND";
@@ -23,6 +25,10 @@ type BaseInput = {
   phone: string | null;
   address: string | null;
   dob: Date;
+  emergencyContactName: string | null;
+  emergencyContactRelationship: string | null;
+  emergencyContactPhone: string | null;
+  disciplineInterests: string[];
   requestedDisabledVeteranDiscount: boolean;
 };
 
@@ -44,6 +50,14 @@ export async function getCurrentOpenApplicationYear(): Promise<MembershipYear> {
     throw new ApplicationFlowError(
       "APPLICATIONS_CLOSED",
       "Applications are currently closed for this membership year."
+    );
+  }
+
+  const applicationWindow = await getApplicationWindow(currentYear);
+  if (!isApplicationOpenNow({ membershipYear, window: applicationWindow })) {
+    throw new ApplicationFlowError(
+      "APPLICATIONS_CLOSED",
+      "Applications are currently outside the configured public window."
     );
   }
 
@@ -96,6 +110,10 @@ export async function createApplicantAccountAndSubmit(input: NewApplicantInput) 
       phone: input.phone,
       address: input.address,
       dob: input.dob,
+      emergencyContactName: input.emergencyContactName,
+      emergencyContactRelationship: input.emergencyContactRelationship,
+      emergencyContactPhone: input.emergencyContactPhone,
+      disciplineInterests: parseDisciplineInterests(input.disciplineInterests),
       role: "MEMBER",
       status: MemberStatus.PENDING,
       isActive: true,
@@ -165,6 +183,10 @@ export async function submitApplicationForExistingAccount(input: BaseInput & { m
       phone: input.phone,
       address: input.address,
       dob: input.dob,
+      emergencyContactName: input.emergencyContactName,
+      emergencyContactRelationship: input.emergencyContactRelationship,
+      emergencyContactPhone: input.emergencyContactPhone,
+      disciplineInterests: parseDisciplineInterests(input.disciplineInterests),
       status: MemberStatus.PENDING,
       isActive: true,
     },

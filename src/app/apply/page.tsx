@@ -8,12 +8,15 @@ import {
   setSessionCookie,
 } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { MEMBER_DISCIPLINE_OPTIONS } from "@/lib/discipline";
 import {
   ApplicationFlowError,
   createApplicantAccountAndSubmit,
   getCurrentOpenApplicationYear,
   submitApplicationForExistingAccount,
 } from "@/services/application-flow";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatusBadge } from "@/components/ui/status-badge";
 
 type SearchParams = {
   success?: string;
@@ -44,6 +47,10 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
     firstName: parts[0],
     lastName: parts.slice(1).join(" "),
   };
+}
+
+function labelForDiscipline(value: string): string {
+  return value.charAt(0) + value.slice(1).toLowerCase();
 }
 
 async function getOpenApplicationYear() {
@@ -110,6 +117,11 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
     const phone = String(formData.get("phone") ?? "").trim() || null;
     const address = String(formData.get("address") ?? "").trim() || null;
     const dob = parseDateInput(String(formData.get("dob") ?? ""));
+    const emergencyContactName = String(formData.get("emergencyContactName") ?? "").trim() || null;
+    const emergencyContactRelationship =
+      String(formData.get("emergencyContactRelationship") ?? "").trim() || null;
+    const emergencyContactPhone = String(formData.get("emergencyContactPhone") ?? "").trim() || null;
+    const disciplineInterests = formData.getAll("disciplineInterests").map((value) => String(value));
     const requestedDisabledVeteranDiscount =
       formData.get("requestedDisabledVeteranDiscount") === "on";
 
@@ -127,6 +139,10 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
         phone,
         address,
         dob,
+        emergencyContactName,
+        emergencyContactRelationship,
+        emergencyContactPhone,
+        disciplineInterests,
         requestedDisabledVeteranDiscount,
       });
 
@@ -170,6 +186,11 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
     const phone = String(formData.get("phone") ?? "").trim() || null;
     const address = String(formData.get("address") ?? "").trim() || null;
     const dob = parseDateInput(String(formData.get("dob") ?? ""));
+    const emergencyContactName = String(formData.get("emergencyContactName") ?? "").trim() || null;
+    const emergencyContactRelationship =
+      String(formData.get("emergencyContactRelationship") ?? "").trim() || null;
+    const emergencyContactPhone = String(formData.get("emergencyContactPhone") ?? "").trim() || null;
+    const disciplineInterests = formData.getAll("disciplineInterests").map((value) => String(value));
     const requestedDisabledVeteranDiscount =
       formData.get("requestedDisabledVeteranDiscount") === "on";
 
@@ -187,6 +208,10 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
         phone,
         address,
         dob,
+        emergencyContactName,
+        emergencyContactRelationship,
+        emergencyContactPhone,
+        disciplineInterests,
         requestedDisabledVeteranDiscount,
       });
     } catch (error) {
@@ -210,15 +235,11 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
   const name = splitName(member?.name ?? "");
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">New Member Application</h1>
-        {member ? (
-          <Link className="text-sm font-medium underline" href="/portal">
-            Back to portal
-          </Link>
-        ) : null}
-      </div>
+    <main className="mx-auto max-w-5xl space-y-6 p-6">
+      <PageHeader
+        subtitle={`Membership Year ${membershipYear.year}. Public applications are open.`}
+        title="New Member Application"
+      />
 
       {searchParams.success ? (
         <p className="rounded border border-green-300 bg-green-50 p-3 text-sm text-green-800">
@@ -231,38 +252,50 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
         </p>
       ) : null}
 
+      <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold">How This Works</h2>
+        <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-gray-700">
+          <li>Create applicant account (or sign in if already created).</li>
+          <li>Submit application details.</li>
+          <li>Await admin approval before payment is available.</li>
+        </ol>
+        {!member ? (
+          <p className="mt-3 text-sm text-gray-600">
+            Already created an account? <Link className="underline" href="/login?next=%2Fapply">Sign in to continue your application.</Link>
+          </p>
+        ) : null}
+      </section>
+
       {application ? (
         <section className="rounded-xl border bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold">Application Status</h2>
-          <p className="mt-2 text-sm">
-            Current status: <span className="font-medium">{application.status}</span>
-          </p>
+          <h2 className="text-xl font-semibold">Current Application Status</h2>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+            <StatusBadge tone={application.status === "APPROVED" ? "success" : application.status === "DENIED" ? "danger" : "info"}>
+              {application.status}
+            </StatusBadge>
+            {application.status === "APPROVED" ? (
+              <StatusBadge tone="info">PAYMENT_AVAILABLE</StatusBadge>
+            ) : null}
+          </div>
           {application.status === "APPROVED" && application.assignedPricingTier ? (
-            <p className="mt-2 text-sm text-gray-700">
-              Assigned tier: {application.assignedPricingTier.name}. Payment is available in your
-              member portal.
+            <p className="mt-3 text-sm text-gray-700">
+              Assigned tier: {application.assignedPricingTier.name}. You can pay from your portal.
             </p>
           ) : null}
           {application.status === "DENIED" && application.denialReason ? (
-            <p className="mt-2 text-sm text-red-700">Denial reason: {application.denialReason}</p>
+            <p className="mt-3 text-sm text-red-700">Denial reason: {application.denialReason}</p>
           ) : null}
         </section>
       ) : null}
 
-      <section className="rounded-xl border bg-white p-6 shadow-sm">
-        <h2 className="text-xl font-semibold">
-          {member ? "Submit or Update Application" : "Create Account and Apply"}
-        </h2>
-        <p className="mt-2 text-sm text-gray-600">
-          Applicants cannot choose pricing tiers. Admin assigns tier after review.
-        </p>
-
-        <form
-          action={member ? updateApplicationAction : createAccountAndSubmitAction}
-          className="mt-5 grid gap-3 sm:grid-cols-2"
-        >
+      <form
+        action={member ? updateApplicationAction : createAccountAndSubmitAction}
+        className="space-y-6"
+      >
+        <section className="rounded-xl border bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold">Step 1: Applicant Account</h2>
           {!member ? (
-            <>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <label className="text-sm font-medium sm:col-span-2">
                 Email
                 <input className="mt-1 w-full rounded border p-2" name="email" required type="email" />
@@ -277,83 +310,127 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
                   type="password"
                 />
               </label>
-            </>
-          ) : null}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-gray-700">Signed in as {member.email}. Continue to application details below.</p>
+          )}
+        </section>
 
-          <label className="text-sm font-medium">
-            First Name
-            <input
-              className="mt-1 w-full rounded border p-2"
-              defaultValue={application?.applicantFirstName ?? name.firstName}
-              name="firstName"
-              required
-            />
-          </label>
+        <section className="rounded-xl border bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold">Step 2: Application Details</h2>
 
-          <label className="text-sm font-medium">
-            Last Name
-            <input
-              className="mt-1 w-full rounded border p-2"
-              defaultValue={application?.applicantLastName ?? name.lastName}
-              name="lastName"
-              required
-            />
-          </label>
-
-          <label className="text-sm font-medium">
-            Phone
-            <input
-              className="mt-1 w-full rounded border p-2"
-              defaultValue={application?.applicantPhone ?? member?.phone ?? ""}
-              name="phone"
-            />
-          </label>
-
-          <label className="text-sm font-medium">
-            Date of Birth
-            <input
-              className="mt-1 w-full rounded border p-2"
-              defaultValue={
-                application?.applicantDob
-                  ? application.applicantDob.toISOString().slice(0, 10)
-                  : member?.dob
-                    ? member.dob.toISOString().slice(0, 10)
-                    : ""
-              }
-              name="dob"
-              required
-              type="date"
-            />
-          </label>
-
-          <label className="text-sm font-medium sm:col-span-2">
-            Address
-            <input
-              className="mt-1 w-full rounded border p-2"
-              defaultValue={application?.applicantAddress ?? member?.address ?? ""}
-              name="address"
-            />
-          </label>
-
-          <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <input
-              defaultChecked={application?.requestedDisabledVeteranDiscount ?? false}
-              name="requestedDisabledVeteranDiscount"
-              type="checkbox"
-            />
-            Request disabled veteran discount (admin approval required)
-          </label>
-
-          <div className="sm:col-span-2">
-            <button
-              className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-              type="submit"
-            >
-              Submit Application
-            </button>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="text-sm font-medium">
+              First Name
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={application?.applicantFirstName ?? name.firstName}
+                name="firstName"
+                required
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Last Name
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={application?.applicantLastName ?? name.lastName}
+                name="lastName"
+                required
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Phone
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={member?.phone ?? ""}
+                name="phone"
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Date of Birth
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={
+                  application?.applicantDob
+                    ? application.applicantDob.toISOString().slice(0, 10)
+                    : member?.dob
+                      ? member.dob.toISOString().slice(0, 10)
+                      : ""
+                }
+                name="dob"
+                required
+                type="date"
+              />
+            </label>
+            <label className="text-sm font-medium sm:col-span-2">
+              Address
+              <input className="mt-1 w-full rounded border p-2" defaultValue={member?.address ?? ""} name="address" />
+            </label>
           </div>
-        </form>
-      </section>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <h3 className="text-base font-semibold sm:col-span-3">Emergency Contact</h3>
+            <label className="text-sm font-medium">
+              Name
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={member?.emergencyContactName ?? ""}
+                name="emergencyContactName"
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Relationship
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={member?.emergencyContactRelationship ?? ""}
+                name="emergencyContactRelationship"
+              />
+            </label>
+            <label className="text-sm font-medium">
+              Phone
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={member?.emergencyContactPhone ?? ""}
+                name="emergencyContactPhone"
+              />
+            </label>
+          </div>
+
+          <div className="mt-6 space-y-2">
+            <h3 className="text-base font-semibold">Disciplines</h3>
+            <p className="text-xs text-gray-500">Select all interests: Archery, Pistol, Rifle, Trap.</p>
+            <div className="grid gap-2 sm:grid-cols-4">
+              {MEMBER_DISCIPLINE_OPTIONS.map((discipline) => (
+                <label className="flex items-center gap-2 text-sm" key={discipline}>
+                  <input
+                    defaultChecked={member?.disciplineInterests.includes(discipline)}
+                    name="disciplineInterests"
+                    type="checkbox"
+                    value={discipline}
+                  />
+                  {labelForDiscipline(discipline)}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6 space-y-2">
+            <h3 className="text-base font-semibold">Discount Request</h3>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                defaultChecked={application?.requestedDisabledVeteranDiscount ?? false}
+                name="requestedDisabledVeteranDiscount"
+                type="checkbox"
+              />
+              Request Disabled Veteran Discount (admin approval required)
+            </label>
+          </div>
+        </section>
+
+        <button className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white" type="submit">
+          Submit Application
+        </button>
+      </form>
     </main>
   );
 }

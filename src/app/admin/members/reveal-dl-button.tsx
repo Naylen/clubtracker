@@ -9,6 +9,13 @@ export function RevealDlButton({ memberId }: { memberId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   async function handleReveal() {
+    const confirmed = window.confirm(
+      "Reveal full driver license value? This action is audited."
+    );
+    if (!confirmed) {
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 

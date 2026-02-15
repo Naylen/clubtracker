@@ -1,12 +1,8 @@
 import Link from "next/link";
-import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { requireCurrentUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
-import {
-  determineRenewalTierForMember,
-  getLateRenewalPolicy,
-  isRenewalBlockedByLatePolicy,
-} from "@/services/membership";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { getMemberPortalState } from "@/services/member-portal";
 import { PayRenewalButton } from "./pay-renewal-button";
 
 function formatCurrency(amountCents: number): string {
@@ -16,180 +12,101 @@ function formatCurrency(amountCents: number): string {
   }).format(amountCents / 100);
 }
 
+function badgeForApplicationStatus(status: string | null): { label: string; tone: "info" | "success" | "danger" | "neutral" } {
+  if (!status) {
+    return { label: "NOT_SUBMITTED", tone: "neutral" };
+  }
+  if (status === "APPROVED") {
+    return { label: "APPROVED", tone: "success" };
+  }
+  if (status === "DENIED") {
+    return { label: "DENIED", tone: "danger" };
+  }
+  if (status === "SUBMITTED") {
+    return { label: "SUBMITTED", tone: "info" };
+  }
+  return { label: status, tone: "neutral" };
+}
+
 export default async function MemberPortalPage() {
   const user = await requireCurrentUser("/portal");
-  const currentYear = getCurrentYearInNewYork();
+  const state = await getMemberPortalState({
+    memberId: user.memberId,
+    email: user.email,
+  });
 
-  const [member, membershipYear, hasAnyActiveEnrollment] = await Promise.all([
-    prisma.member.findUnique({ where: { id: user.memberId } }),
-    prisma.membershipYear.findUnique({
-      where: { year: currentYear },
-    }),
-    prisma.membershipEnrollment.count({
-      where: {
-        memberId: user.memberId,
-        status: "ACTIVE",
-      },
-    }),
-  ]);
-
-  const enrollment = membershipYear
-    ? await prisma.membershipEnrollment.findUnique({
-        where: {
-          memberId_membershipYearId: {
-            memberId: user.memberId,
-            membershipYearId: membershipYear.id,
-          },
-        },
-      })
-    : null;
-  const application = membershipYear
-    ? await prisma.membershipApplication.findUnique({
-        where: {
-          membershipYearId_applicantEmail: {
-            membershipYearId: membershipYear.id,
-            applicantEmail: user.email,
-          },
-        },
-        include: {
-          assignedPricingTier: true,
-        },
-      })
-    : null;
-
-  const renewalTier =
-    member && membershipYear ? await determineRenewalTierForMember({ member, membershipYear }) : null;
-  const price = application?.assignedPricingTier ?? renewalTier;
-  const lateRenewalPolicy = await getLateRenewalPolicy();
-  const isExistingMember = hasAnyActiveEnrollment > 0;
-  const renewalBlocked = membershipYear && isExistingMember
-    ? await isRenewalBlockedByLatePolicy({ membershipYear })
-    : false;
-
-  const alreadyRenewed = enrollment?.status === "ACTIVE";
-  const applicationApproved = application?.status === "APPROVED" && Boolean(application.assignedPricingTier);
-  const canPay =
-    Boolean(member && membershipYear && !alreadyRenewed && !renewalBlocked) &&
-    (isExistingMember || applicationApproved);
-
-  let disabledReason = "";
-  if (!membershipYear) {
-    disabledReason = `Membership year ${currentYear} has not been opened yet.`;
-  } else if (!isExistingMember && !application) {
-    disabledReason = "Submit your application before payment is available.";
-  } else if (application?.status === "SUBMITTED") {
-    disabledReason = "Awaiting admin approval before payment is available.";
-  } else if (application?.status === "DENIED") {
-    disabledReason = application.denialReason
-      ? `Application denied: ${application.denialReason}`
-      : "Application denied.";
-  } else if (!isExistingMember && application?.status !== "APPROVED") {
-    disabledReason = "Application must be approved before payment is available.";
-  } else if (!isExistingMember && !application?.assignedPricingTier) {
-    disabledReason = "Awaiting pricing tier assignment.";
-  } else if (alreadyRenewed) {
-    disabledReason = "Your renewal is already paid and active for this year.";
-  } else if (renewalBlocked) {
-    disabledReason = "Renewal is past due and late renewals are currently disabled.";
-  } else if (!price) {
-    disabledReason = "No active pricing tier is available for this year.";
-  }
+  const appBadge = badgeForApplicationStatus(state.application?.status ?? null);
 
   return (
-    <main className="mx-auto max-w-3xl p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Member Portal</h1>
-        <form action="/api/auth/logout" method="post">
-          <button className="rounded border px-3 py-2 text-sm" type="submit">
-            Sign Out
-          </button>
-        </form>
-      </div>
+    <main className="mx-auto max-w-5xl space-y-6 p-6">
+      <PageHeader
+        subtitle="Your current-year membership and application status at a glance."
+        title="Member Portal"
+      />
 
-      <section className="rounded border bg-white p-6">
-        <h2 className="mb-4 text-xl font-semibold">Application Status</h2>
-
-        {membershipYear ? (
-          <div className="mb-6 space-y-2 text-sm">
-            <p>
-              <span className="font-medium">Applications:</span>{" "}
-              {membershipYear.applicationEnabled ? "Open" : "Closed"}
-            </p>
-            <p>
-              <span className="font-medium">Your status:</span>{" "}
-              {isExistingMember && !application ? "CURRENT_MEMBER" : application ? application.status : "NOT_SUBMITTED"}
-            </p>
-            {application?.assignedPricingTier ? (
+      <section className="grid gap-4 md:grid-cols-3">
+        <article className="rounded-xl border bg-white p-5 shadow-sm md:col-span-2">
+          <h2 className="text-xl font-semibold">Membership Status</h2>
+          {state.membershipYear ? (
+            <div className="mt-4 space-y-3 text-sm">
               <p>
-                <span className="font-medium">Assigned Tier:</span>{" "}
-                {application.assignedPricingTier.name} (
-                {formatCurrency(application.assignedPricingTier.amountCents)})
+                <span className="font-medium">Membership Year:</span> {state.membershipYear.year}
               </p>
-            ) : null}
-            {application?.status === "DENIED" && application.denialReason ? (
-              <p className="text-red-700">
-                <span className="font-medium">Denial reason:</span> {application.denialReason}
+              <p>
+                <span className="font-medium">Term:</span>{" "}
+                {state.membershipYear.startsAt.toLocaleDateString()} - {state.membershipYear.endsAt.toLocaleDateString()}
               </p>
+              <p>
+                <span className="font-medium">Renewal Due:</span>{" "}
+                {state.membershipYear.renewalDueAt.toLocaleDateString()}
+              </p>
+              <p>
+                <span className="font-medium">Enrollment Status:</span>{" "}
+                <StatusBadge tone={state.alreadyRenewed ? "success" : "info"}>
+                  {state.enrollment?.status ?? "PENDING_RENEWAL"}
+                </StatusBadge>
+              </p>
+              {state.effectiveTier ? (
+                <p>
+                  <span className="font-medium">Pricing Tier:</span> {state.effectiveTier.name} ({formatCurrency(state.effectiveTier.amountCents)})
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-gray-600">Membership year is not available yet.</p>
+          )}
+        </article>
+
+        <article className="rounded-xl border bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-semibold">Application Status</h2>
+          <div className="mt-4 space-y-3 text-sm">
+            <p>
+              <StatusBadge tone={appBadge.tone}>{appBadge.label}</StatusBadge>
+            </p>
+            <p className="text-gray-700">{state.cta.message}</p>
+            {state.application?.status === "DENIED" && state.application.denialReason ? (
+              <p className="text-red-700">Reason: {state.application.denialReason}</p>
             ) : null}
-            {membershipYear.applicationEnabled && !isExistingMember && application?.status !== "APPROVED" ? (
-              <Link className="inline-block rounded border px-3 py-1.5 text-sm" href="/apply">
-                {application ? "Update Application" : "Start Application"}
+            {state.membershipYear?.applicationEnabled && !state.isExistingMember && state.application?.status !== "APPROVED" ? (
+              <Link className="inline-flex rounded border px-3 py-1.5 text-sm font-medium" href="/apply">
+                {state.application ? "Update Application" : "Start Application"}
               </Link>
             ) : null}
           </div>
-        ) : null}
-
+        </article>
       </section>
 
-      <section className="rounded border bg-white p-6">
-        <h2 className="mb-4 text-xl font-semibold">Current Membership</h2>
-
-        {membershipYear ? (
-          <div className="space-y-3 text-sm">
-            <p>
-              <span className="font-medium">Year:</span> {membershipYear.year}
-            </p>
-            <p>
-              <span className="font-medium">Term:</span>{" "}
-              {membershipYear.startsAt.toLocaleDateString()} -{" "}
-              {membershipYear.endsAt.toLocaleDateString()}
-            </p>
-            <p>
-              <span className="font-medium">Renewal Due:</span>{" "}
-              {membershipYear.renewalDueAt.toLocaleDateString()}
-            </p>
-            <p>
-              <span className="font-medium">Status:</span>{" "}
-              {enrollment ? enrollment.status : "PENDING_RENEWAL"}
-            </p>
-            {price ? (
-              <>
-                <p>
-                  <span className="font-medium">Renewal Price:</span>{" "}
-                  {formatCurrency(price.amountCents)}
-                </p>
-                <p>
-                  <span className="font-medium">Pricing Tier:</span> {price.name} ({price.code})
-                </p>
-              </>
-            ) : null}
-            <p>
-              <span className="font-medium">Late Renewal Policy:</span>{" "}
-              {lateRenewalPolicy.enabled ? "Enabled" : "Disabled"}
-            </p>
-
-            <div className="pt-3">
-              <PayRenewalButton
-                disabled={!canPay}
-                disabledReason={disabledReason}
-              />
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-600">
-            Membership year {currentYear} has not been opened yet.
-          </p>
-        )}
+      <section className="rounded-xl border bg-white p-5 shadow-sm">
+        <h2 className="text-xl font-semibold">Next Action</h2>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <PayRenewalButton disabled={!state.canPay} disabledReason={state.cta.message} />
+          <Link className="rounded border px-3 py-2 text-sm font-medium" href="/portal/profile">
+            My Profile
+          </Link>
+          <Link className="rounded border px-3 py-2 text-sm font-medium" href="/portal/status">
+            Full Status
+          </Link>
+        </div>
       </section>
     </main>
   );
