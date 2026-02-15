@@ -11,6 +11,27 @@ export const DEFAULT_STANDARD_RENEWAL_PRICE_CENTS = 15000;
 export const DEFAULT_DISCOUNT_RENEWAL_PRICE_CENTS = 10000;
 const ACCEPT_LATE_RENEWALS_KEY = "acceptLateRenewals";
 
+const DEFAULT_PRICING_TIERS = [
+  {
+    code: "STANDARD",
+    name: "Standard",
+    amountCents: DEFAULT_STANDARD_RENEWAL_PRICE_CENTS,
+    isSenior: false,
+  },
+  {
+    code: "SENIOR",
+    name: "Senior (65+)",
+    amountCents: DEFAULT_DISCOUNT_RENEWAL_PRICE_CENTS,
+    isSenior: true,
+  },
+  {
+    code: "DISABLED_VETERAN",
+    name: "Disabled Veteran",
+    amountCents: DEFAULT_DISCOUNT_RENEWAL_PRICE_CENTS,
+    isSenior: false,
+  },
+] as const;
+
 export type LateRenewalPolicy = {
   enabled: boolean;
   policyNotes: string;
@@ -97,6 +118,7 @@ export async function createOrOpenMembershipYear(year: number) {
       discountPriceCents: DEFAULT_DISCOUNT_RENEWAL_PRICE_CENTS,
       signupDate: defaultSignupDate,
       signupEnabled: true,
+      applicationEnabled: false,
       ...dates,
     },
   });
@@ -133,7 +155,38 @@ export async function createOrOpenMembershipYear(year: number) {
     },
   });
 
+  await ensureDefaultPricingTiers(membershipYear.id);
+
   return membershipYear;
+}
+
+export async function ensureDefaultPricingTiers(membershipYearId: string) {
+  for (const tier of DEFAULT_PRICING_TIERS) {
+    await prisma.pricingTier.upsert({
+      where: {
+        membershipYearId_code: {
+          membershipYearId,
+          code: tier.code,
+        },
+      },
+      update: {
+        name: tier.name,
+        amountCents: tier.amountCents,
+        isActive: true,
+        isSenior: tier.isSenior,
+        requiresAdminApproval: true,
+      },
+      create: {
+        membershipYearId,
+        code: tier.code,
+        name: tier.name,
+        amountCents: tier.amountCents,
+        isActive: true,
+        isSenior: tier.isSenior,
+        requiresAdminApproval: true,
+      },
+    });
+  }
 }
 
 export async function countActiveEnrollments(membershipYearId: string): Promise<number> {

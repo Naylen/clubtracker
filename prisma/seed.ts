@@ -35,9 +35,67 @@ async function main() {
       discountPriceCents: 10000,
       signupDate: new Date(`${currentYear}-02-01T09:00:00-05:00`),
       signupEnabled: true,
+      applicationEnabled: false,
       ...dates,
     },
   });
+
+  const membershipYear = await prisma.membershipYear.findUnique({
+    where: { year: currentYear },
+    select: { id: true },
+  });
+
+  if (!membershipYear) {
+    throw new Error("Membership year could not be created for seeding pricing tiers.");
+  }
+
+  const defaultTiers = [
+    {
+      code: "STANDARD",
+      name: "Standard",
+      amountCents: 15000,
+      isSenior: false,
+    },
+    {
+      code: "SENIOR",
+      name: "Senior (65+)",
+      amountCents: 10000,
+      isSenior: true,
+    },
+    {
+      code: "DISABLED_VETERAN",
+      name: "Disabled Veteran",
+      amountCents: 10000,
+      isSenior: false,
+    },
+  ];
+
+  for (const tier of defaultTiers) {
+    await prisma.pricingTier.upsert({
+      where: {
+        membershipYearId_code: {
+          membershipYearId: membershipYear.id,
+          code: tier.code,
+        },
+      },
+      update: {
+        name: tier.name,
+        amountCents: tier.amountCents,
+        isActive: true,
+        isSenior: tier.isSenior,
+        requiresAdminApproval: true,
+      },
+      create: {
+        membershipYearId: membershipYear.id,
+        code: tier.code,
+        name: tier.name,
+        amountCents: tier.amountCents,
+        isActive: true,
+        isSenior: tier.isSenior,
+        requiresAdminApproval: true,
+      },
+    });
+  }
 
   await prisma.systemSettings.upsert({
     where: { key: "acceptLateRenewals" },

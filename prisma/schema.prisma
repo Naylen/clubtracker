@@ -40,6 +40,13 @@ enum MemberDiscipline {
   TRAP
 }
 
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  DENIED
+}
+
 model Member {
   id                String                 @id @default(uuid())
   name              String
@@ -66,6 +73,8 @@ model Member {
   householdMembers  HouseholdMember[]
   enrollments       MembershipEnrollment[]
   payments          Payment[]
+  applications      MembershipApplication[] @relation("ApplicantApplications")
+  reviewedApplications MembershipApplication[] @relation("ReviewedApplications")
   communicationLogs CommunicationLog[]
   authoredAuditLogs AuditLog[]             @relation("AuditActor")
   targetedAuditLogs AuditLog[]             @relation("AuditTarget")
@@ -98,11 +107,59 @@ model MembershipYear {
   discountPriceCents Int  @default(10000)
   signupDate     DateTime?
   signupEnabled  Boolean  @default(true)
+  applicationEnabled Boolean @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   enrollments MembershipEnrollment[]
   payments    Payment[]
+  pricingTiers PricingTier[]
+  applications MembershipApplication[]
+}
+
+model PricingTier {
+  id                   String   @id @default(uuid())
+  membershipYearId     String
+  code                 String
+  name                 String
+  amountCents          Int
+  isActive             Boolean  @default(true)
+  isSenior             Boolean  @default(false)
+  requiresAdminApproval Boolean @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  membershipYear MembershipYear          @relation(fields: [membershipYearId], references: [id], onDelete: Cascade)
+  applications   MembershipApplication[]
+
+  @@unique([membershipYearId, code])
+  @@index([membershipYearId, isActive])
+}
+
+model MembershipApplication {
+  id                             String            @id @default(uuid())
+  memberId                       String
+  membershipYearId               String
+  status                         ApplicationStatus @default(DRAFT)
+  requestedDisabledVeteranDiscount Boolean         @default(false)
+  disabledVeteranApproved        Boolean?
+  seniorAutoApplied              Boolean           @default(false)
+  assignedPricingTierId          String?
+  submittedAt                    DateTime?
+  reviewedAt                     DateTime?
+  reviewedByMemberId             String?
+  denialReason                   String?
+  createdAt                      DateTime          @default(now())
+  updatedAt                      DateTime          @updatedAt
+
+  member            Member       @relation("ApplicantApplications", fields: [memberId], references: [id], onDelete: Cascade)
+  reviewedByMember  Member?      @relation("ReviewedApplications", fields: [reviewedByMemberId], references: [id], onDelete: SetNull)
+  membershipYear    MembershipYear @relation(fields: [membershipYearId], references: [id], onDelete: Cascade)
+  assignedPricingTier PricingTier? @relation(fields: [assignedPricingTierId], references: [id], onDelete: SetNull)
+
+  @@unique([memberId, membershipYearId])
+  @@index([membershipYearId, status])
+  @@index([reviewedByMemberId])
 }
 
 model MembershipEnrollment {
