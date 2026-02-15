@@ -13,6 +13,9 @@ type MembershipYearSettings = {
   applicationEnabled: boolean;
   applicationOpensAt: string | null;
   applicationClosesAt: string | null;
+  applicationSignupDayGateEnabled: boolean;
+  applicationSignupGateStartsAt: string | null;
+  applicationSignupGateEndsAt: string | null;
   lateRenewalsEnabled: boolean;
   lateRenewalPolicyNotes: string;
   activeEnrollments: number;
@@ -57,6 +60,9 @@ type MembershipDraft = {
   applicationEnabled: boolean;
   applicationOpensAt: string;
   applicationClosesAt: string;
+  enforceSignupDayWindow: boolean;
+  applicationSignupGateStartsAt: string;
+  applicationSignupGateEndsAt: string;
   signupEnabled: boolean;
   signupDate: string;
 };
@@ -109,6 +115,35 @@ function parseLocalDateForApi(value: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function toNyDateTimeInput(isoDate: string | null): string {
+  if (!isoDate) {
+    return "";
+  }
+
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === "year")?.value ?? "0000";
+  const month = parts.find((part) => part.type === "month")?.value ?? "01";
+  const day = parts.find((part) => part.type === "day")?.value ?? "01";
+  const hour = parts.find((part) => part.type === "hour")?.value ?? "00";
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
+
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
 function normalizeTab(tab: string | undefined): ActiveTab {
   if (tab && TAB_KEYS.includes(tab as ActiveTab)) {
     return tab as ActiveTab;
@@ -132,6 +167,8 @@ function buildMembershipDraft(state: MembershipDraft): MembershipDraft {
     lateRenewalPolicyNotes: state.lateRenewalPolicyNotes.trim(),
     applicationOpensAt: state.applicationOpensAt.trim(),
     applicationClosesAt: state.applicationClosesAt.trim(),
+    applicationSignupGateStartsAt: state.applicationSignupGateStartsAt.trim(),
+    applicationSignupGateEndsAt: state.applicationSignupGateEndsAt.trim(),
     signupDate: state.signupDate.trim(),
   };
 }
@@ -181,6 +218,9 @@ export function MembershipSettingsClient({
   const [applicationEnabled, setApplicationEnabled] = useState(false);
   const [applicationOpensAt, setApplicationOpensAt] = useState("");
   const [applicationClosesAt, setApplicationClosesAt] = useState("");
+  const [enforceSignupDayWindow, setEnforceSignupDayWindow] = useState(false);
+  const [applicationSignupGateStartsAt, setApplicationSignupGateStartsAt] = useState("");
+  const [applicationSignupGateEndsAt, setApplicationSignupGateEndsAt] = useState("");
 
   const [signupEnabled, setSignupEnabled] = useState(true);
   const [signupDate, setSignupDate] = useState("");
@@ -242,6 +282,9 @@ export function MembershipSettingsClient({
         applicationEnabled,
         applicationOpensAt,
         applicationClosesAt,
+        enforceSignupDayWindow,
+        applicationSignupGateStartsAt,
+        applicationSignupGateEndsAt,
         signupEnabled,
         signupDate,
       };
@@ -258,6 +301,9 @@ export function MembershipSettingsClient({
       applicationEnabled,
       applicationOpensAt,
       applicationClosesAt,
+      enforceSignupDayWindow,
+      applicationSignupGateStartsAt,
+      applicationSignupGateEndsAt,
       signupEnabled,
       signupDate,
     ]
@@ -294,6 +340,9 @@ export function MembershipSettingsClient({
       applicationEnabled: settings.applicationEnabled,
       applicationOpensAt: toNyDateInput(settings.applicationOpensAt),
       applicationClosesAt: toNyDateInput(settings.applicationClosesAt),
+      enforceSignupDayWindow: settings.applicationSignupDayGateEnabled,
+      applicationSignupGateStartsAt: toNyDateTimeInput(settings.applicationSignupGateStartsAt),
+      applicationSignupGateEndsAt: toNyDateTimeInput(settings.applicationSignupGateEndsAt),
       signupEnabled: settings.signupEnabled,
       signupDate: toNyDateInput(settings.signupDate),
     };
@@ -310,6 +359,9 @@ export function MembershipSettingsClient({
     setApplicationEnabled(nextDraft.applicationEnabled);
     setApplicationOpensAt(nextDraft.applicationOpensAt);
     setApplicationClosesAt(nextDraft.applicationClosesAt);
+    setEnforceSignupDayWindow(nextDraft.enforceSignupDayWindow);
+    setApplicationSignupGateStartsAt(nextDraft.applicationSignupGateStartsAt);
+    setApplicationSignupGateEndsAt(nextDraft.applicationSignupGateEndsAt);
     setSignupEnabled(nextDraft.signupEnabled);
     setSignupDate(nextDraft.signupDate);
 
@@ -383,6 +435,9 @@ export function MembershipSettingsClient({
         applicationEnabled,
         applicationOpensAt: parseLocalDateForApi(applicationOpensAt),
         applicationClosesAt: parseLocalDateForApi(applicationClosesAt),
+        enforceSignupDayWindow,
+        applicationSignupGateStartsAt: parseLocalDateForApi(applicationSignupGateStartsAt),
+        applicationSignupGateEndsAt: parseLocalDateForApi(applicationSignupGateEndsAt),
         signupEnabled,
         signupDate: parseLocalDateForApi(signupDate),
       }),
@@ -641,6 +696,40 @@ export function MembershipSettingsClient({
                   value={applicationClosesAt}
                 />
               </label>
+            </div>
+
+            <div className="rounded border p-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  checked={enforceSignupDayWindow}
+                  onChange={(event) => setEnforceSignupDayWindow(event.target.checked)}
+                  type="checkbox"
+                />
+                Signup Day Gate (restrict public /apply to signup-day window)
+              </label>
+              <p className="mt-2 text-xs text-gray-500">
+                Leave start/end blank to use the signup day date from 12:00 AM to 11:59 PM America/New_York.
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="text-sm">
+                  <span className="mb-1 block font-medium">Gate Start (optional)</span>
+                  <input
+                    className="w-full rounded border p-2"
+                    onChange={(event) => setApplicationSignupGateStartsAt(event.target.value)}
+                    type="datetime-local"
+                    value={applicationSignupGateStartsAt}
+                  />
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block font-medium">Gate End (optional)</span>
+                  <input
+                    className="w-full rounded border p-2"
+                    onChange={(event) => setApplicationSignupGateEndsAt(event.target.value)}
+                    type="datetime-local"
+                    value={applicationSignupGateEndsAt}
+                  />
+                </label>
+              </div>
             </div>
           </div>
         ) : null}

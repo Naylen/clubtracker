@@ -1,26 +1,28 @@
-import { calculateAgeOnDate, isSeniorOnDate } from "@/lib/membership-dates";
+import { type PricingTier } from "@prisma/client";
+import {
+  computeApplicantAgeOnSignupDay,
+  determineRecommendedTier,
+} from "@/services/application-policy";
 
 export function deriveApplicationReviewState(input: {
   applicantDob: Date | null;
   signupDay: Date;
   requestedDisabledVeteranDiscount: boolean;
+  availableTiers?: Array<Pick<PricingTier, "id" | "code" | "name" | "amountCents">>;
 }) {
-  const ageOnSignupDay = input.applicantDob
-    ? calculateAgeOnDate(input.applicantDob, input.signupDay)
-    : null;
-  const seniorAutoEligible = input.applicantDob
-    ? isSeniorOnDate(input.applicantDob, input.signupDay)
-    : false;
-
-  const suggestedTierCode = seniorAutoEligible
-    ? "SENIOR"
-    : input.requestedDisabledVeteranDiscount
-      ? "DISABLED_VETERAN"
-      : "STANDARD";
+  const ageOnSignupDay = computeApplicantAgeOnSignupDay(
+    input.applicantDob,
+    input.signupDay
+  );
+  const recommendation = determineRecommendedTier({
+    ageOnSignupDay,
+    dvRequested: input.requestedDisabledVeteranDiscount,
+    availableTiers: input.availableTiers ?? [],
+  });
 
   return {
     ageOnSignupDay,
-    seniorAutoEligible,
-    suggestedTierCode,
+    seniorAutoEligible: recommendation.seniorEligible,
+    suggestedTierCode: recommendation.suggestedTierCode,
   };
 }

@@ -149,4 +149,65 @@ describe("Stripe checkout route gating", () => {
     expect(body.error).toContain("No active pricing tier");
     expect(createCheckoutSession).not.toHaveBeenCalled();
   });
+
+  it("allows checkout when application is approved and tier is assigned", async () => {
+    membershipApplicationFindUnique.mockResolvedValue({
+      id: "app_1",
+      status: "APPROVED",
+      denialReason: null,
+      requestedDisabledVeteranDiscount: true,
+      assignedPricingTier: {
+        id: "tier_standard",
+        code: "STANDARD",
+        name: "Standard",
+        amountCents: 15000,
+        isActive: true,
+      },
+    });
+
+    const { POST } = await import("@/app/api/payments/stripe/checkout/route");
+    const response = await POST(
+      new NextRequest("http://localhost/api/payments/stripe/checkout", {
+        method: "POST",
+      })
+    );
+    const body = (await response.json()) as { url?: string; error?: string };
+
+    expect(response.status).toBe(200);
+    expect(body.url).toBe("https://stripe.test/checkout");
+    expect(createCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amountCents: 15000,
+        discountReason: "STANDARD",
+      })
+    );
+  });
+
+  it("keeps renewal checkout working when no new-member application exists", async () => {
+    membershipApplicationFindUnique.mockResolvedValue(null);
+    membershipEnrollmentCount.mockResolvedValue(1);
+    determineRenewalTierForMember.mockResolvedValue({
+      id: "tier_senior",
+      code: "SENIOR",
+      name: "Senior (65+)",
+      amountCents: 10000,
+    });
+
+    const { POST } = await import("@/app/api/payments/stripe/checkout/route");
+    const response = await POST(
+      new NextRequest("http://localhost/api/payments/stripe/checkout", {
+        method: "POST",
+      })
+    );
+    const body = (await response.json()) as { url?: string; error?: string };
+
+    expect(response.status).toBe(200);
+    expect(body.url).toBe("https://stripe.test/checkout");
+    expect(createCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amountCents: 10000,
+        discountReason: "SENIOR",
+      })
+    );
+  });
 });

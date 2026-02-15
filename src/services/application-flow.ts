@@ -3,7 +3,13 @@ import { prisma } from "@/lib/db";
 import { parseDisciplineInterests } from "@/lib/discipline";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { hashPassword } from "@/lib/password";
-import { getApplicationWindow, isApplicationOpenNow } from "@/services/operations-state";
+import { countActiveEnrollments } from "@/services/membership";
+import {
+  canPublicApply,
+  getApplicationSignupDayGate,
+  type PublicApplyDecision,
+} from "@/services/application-policy";
+import { getApplicationWindow } from "@/services/operations-state";
 
 export class ApplicationFlowError extends Error {
   code: "APPLICATIONS_CLOSED" | "ACTIVE_MEMBER_EXISTS" | "ACCOUNT_EXISTS" | "ACCOUNT_NOT_FOUND";
@@ -16,6 +22,11 @@ export class ApplicationFlowError extends Error {
     this.code = code;
   }
 }
+
+export type CurrentPublicApplicationState = {
+  membershipYear: MembershipYear | null;
+  decision: PublicApplyDecision;
+};
 
 type BaseInput = {
   membershipYearId: string;
@@ -41,27 +52,39 @@ function combineName(firstName: string, lastName: string): string {
 }
 
 export async function getCurrentOpenApplicationYear(): Promise<MembershipYear> {
+  const state = await getCurrentPublicApplicationState();
+  if (!state.membershipYear || !state.decision.allowed) {
+    throw new ApplicationFlowError("APPLICATIONS_CLOSED", state.decision.message);
+  }
+  return state.membershipYear;
+}
+
+export async function getCurrentPublicApplicationState(
+  asOf?: Date
+): Promise<CurrentPublicApplicationState> {
   const currentYear = getCurrentYearInNewYork();
   const membershipYear = await prisma.membershipYear.findUnique({
     where: { year: currentYear },
   });
 
-  if (!membershipYear || !membershipYear.applicationEnabled) {
-    throw new ApplicationFlowError(
-      "APPLICATIONS_CLOSED",
-      "Applications are currently closed for this membership year."
-    );
-  }
+  const [applicationWindow, signupGate, activeEnrollments] = await Promise.all([
+    getApplicationWindow(currentYear),
+    getApplicationSignupDayGate(currentYear),
+    membershipYear ? countActiveEnrollments(membershipYear.id) : Promise.resolve(0),
+  ]);
 
-  const applicationWindow = await getApplicationWindow(currentYear);
-  if (!isApplicationOpenNow({ membershipYear, window: applicationWindow })) {
-    throw new ApplicationFlowError(
-      "APPLICATIONS_CLOSED",
-      "Applications are currently outside the configured public window."
-    );
-  }
+  const decision = canPublicApply({
+    membershipYear,
+    applicationWindow,
+    signupGate,
+    activeEnrollments,
+    asOf,
+  });
 
-  return membershipYear;
+  return {
+    membershipYear,
+    decision,
+  };
 }
 
 async function ensureMemberCanApply(input: { memberId: string; email: string; status: MemberStatus }) {

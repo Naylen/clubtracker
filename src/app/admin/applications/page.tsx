@@ -10,7 +10,8 @@ import {
 } from "@/lib/membership-dates";
 import { PageShell } from "@/components/ui/page-shell";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { getApplicationWindow, isApplicationOpenNow } from "@/services/operations-state";
+import { canPublicApply, getApplicationSignupDayGate } from "@/services/application-policy";
+import { getApplicationWindow } from "@/services/operations-state";
 
 type SearchParams = {
   year?: string;
@@ -65,7 +66,7 @@ export default async function AdminApplicationsPage({
 
   const membershipYear = await prisma.membershipYear.findUnique({
     where: { year: selectedYear },
-    select: { id: true, year: true, signupDate: true, applicationEnabled: true },
+    select: { id: true, year: true, signupDate: true, applicationEnabled: true, membershipCap: true },
   });
 
   const applications = membershipYear
@@ -97,10 +98,29 @@ export default async function AdminApplicationsPage({
   const signupDay = membershipYear
     ? determineSignupDay({ year: membershipYear.year, signupDate: membershipYear.signupDate })
     : null;
-  const applicationWindow = membershipYear ? await getApplicationWindow(membershipYear.year) : null;
-  const applicationsOpen = membershipYear
-    ? isApplicationOpenNow({ membershipYear, window: applicationWindow ?? { opensAt: null, closesAt: null } })
-    : false;
+  const [applicationWindow, signupDayGate, activeEnrollments] = membershipYear
+    ? await Promise.all([
+        getApplicationWindow(membershipYear.year),
+        getApplicationSignupDayGate(membershipYear.year),
+        prisma.membershipEnrollment.count({
+          where: {
+            membershipYearId: membershipYear.id,
+            status: "ACTIVE",
+          },
+        }),
+      ])
+    : [
+        { opensAt: null, closesAt: null },
+        { enforceSignupDayWindow: false, startsAt: null, endsAt: null },
+        0,
+      ];
+  const applicationsDecision = canPublicApply({
+    membershipYear,
+    applicationWindow,
+    signupGate: signupDayGate,
+    activeEnrollments,
+  });
+  const applicationsOpen = applicationsDecision.allowed;
 
   return (
     <PageShell
@@ -154,7 +174,7 @@ export default async function AdminApplicationsPage({
             ) : (
               <>
                 <p className="mt-1 text-gray-700">
-                  Applications are closed. Open them in Settings to allow public access to{" "}
+                  {applicationsDecision.message} Open settings to allow public access to{" "}
                   <span className="rounded bg-gray-200 px-1 py-0.5 font-mono">/apply</span>.
                 </p>
                 <Link

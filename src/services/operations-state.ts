@@ -2,6 +2,7 @@ import { Prisma, type MembershipYear } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { logSetupIssueOnce, validateRuntimeEnvironment } from "@/lib/runtime-env";
+import { canPublicApply, getApplicationSignupDayGate } from "@/services/application-policy";
 import {
   countActiveEnrollments,
   DEFAULT_MEMBERSHIP_CAP,
@@ -232,6 +233,11 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
   }
 
   let window: ApplicationWindow = { opensAt: null, closesAt: null };
+  let signupGate = {
+    enforceSignupDayWindow: false,
+    startsAt: null,
+    endsAt: null,
+  };
   let latePolicy: Awaited<ReturnType<typeof getLateRenewalPolicy>> = {
     enabled: false,
     policyNotes: "",
@@ -242,9 +248,10 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
   let unpaidRenewals = 0;
 
   try {
-    [window, latePolicy, activeEnrollments, activeMembers, pendingApplications, unpaidRenewals] =
+    [window, signupGate, latePolicy, activeEnrollments, activeMembers, pendingApplications, unpaidRenewals] =
       await Promise.all([
         getApplicationWindow(year),
+        getApplicationSignupDayGate(year),
         getLateRenewalPolicy(),
         countActiveEnrollments(membershipYear.id),
         prisma.member.count({
@@ -279,15 +286,18 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
     throw error;
   }
 
-  const applicationPublicOpen = isApplicationOpenNow({
+  const publicApplyDecision = canPublicApply({
     membershipYear,
-    window,
+    applicationWindow: window,
+    signupGate,
+    activeEnrollments,
   });
+  const applicationPublicOpen = publicApplyDecision.allowed;
   const capacityRemaining = Math.max(0, membershipYear.membershipCap - activeEnrollments);
 
   const alerts: string[] = [];
   if (!applicationPublicOpen) {
-    alerts.push("Public applications are currently closed.");
+    alerts.push(publicApplyDecision.message);
   }
   if (capacityRemaining === 0) {
     alerts.push("Membership capacity is full.");

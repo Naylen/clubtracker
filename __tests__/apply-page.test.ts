@@ -1,24 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const membershipYearFindUnique = vi.fn();
 const getCurrentUser = vi.fn();
-const notFound = vi.fn(() => {
-  throw new Error("NOT_FOUND");
-});
+const getCurrentPublicApplicationState = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    membershipYear: {
-      findUnique: membershipYearFindUnique,
+    member: {
+      findUnique: vi.fn(),
     },
-    systemSettings: {
-      findUnique: vi.fn().mockResolvedValue(null),
+    membershipEnrollment: {
+      count: vi.fn(),
+    },
+    membershipApplication: {
+      findUnique: vi.fn(),
     },
   },
-}));
-
-vi.mock("@/lib/membership-dates", () => ({
-  getCurrentYearInNewYork: () => 2026,
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -33,7 +29,6 @@ vi.mock("@/lib/password", () => ({
 }));
 
 vi.mock("next/navigation", () => ({
-  notFound,
   redirect: vi.fn(() => {
     throw new Error("REDIRECT");
   }),
@@ -62,22 +57,114 @@ vi.mock("@/services/operations-state", () => ({
   }),
 }));
 
+vi.mock("@/services/application-flow", () => ({
+  ApplicationFlowError: class extends Error {
+    code:
+      | "APPLICATIONS_CLOSED"
+      | "ACTIVE_MEMBER_EXISTS"
+      | "ACCOUNT_EXISTS"
+      | "ACCOUNT_NOT_FOUND";
+
+    constructor(
+      code:
+        | "APPLICATIONS_CLOSED"
+        | "ACTIVE_MEMBER_EXISTS"
+        | "ACCOUNT_EXISTS"
+        | "ACCOUNT_NOT_FOUND",
+      message: string
+    ) {
+      super(message);
+      this.code = code;
+    }
+  },
+  createApplicantAccountAndSubmit: vi.fn(),
+  submitApplicationForExistingAccount: vi.fn(),
+  getCurrentOpenApplicationYear: vi.fn(),
+  getCurrentPublicApplicationState,
+}));
+
+function collectText(input: unknown, output: string[] = []): string[] {
+  if (input === null || input === undefined || typeof input === "boolean") {
+    return output;
+  }
+
+  if (typeof input === "string" || typeof input === "number") {
+    output.push(String(input));
+    return output;
+  }
+
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      collectText(item, output);
+    }
+    return output;
+  }
+
+  if (typeof input === "object" && "props" in input) {
+    const props = (input as { props?: { children?: unknown } }).props;
+    if (props && "children" in props) {
+      collectText(props.children, output);
+    }
+  }
+
+  return output;
+}
+
 describe("/apply gating", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    getCurrentUser.mockResolvedValue(null);
   });
 
-  it("is not reachable when applications are closed for the year", async () => {
-    membershipYearFindUnique.mockResolvedValue({
-      id: "year_1",
-      year: 2026,
-      applicationEnabled: false,
+  it("renders a closed-page message when applications are disabled", async () => {
+    getCurrentPublicApplicationState.mockResolvedValue({
+      membershipYear: {
+        id: "year_1",
+        year: 2026,
+      },
+      decision: {
+        allowed: false,
+        reasonCode: "APPLICATIONS_TOGGLE_OFF",
+        message: "Applications are currently closed by the club.",
+        signupDay: new Date("2026-02-07T12:00:00-05:00"),
+        gateStartsAt: null,
+        gateEndsAt: null,
+      },
     });
-    getCurrentUser.mockResolvedValue(null);
 
     const pageModule = await import("@/app/apply/page");
-    await expect(pageModule.default({ searchParams: {} })).rejects.toThrow("NOT_FOUND");
-    expect(notFound).toHaveBeenCalledTimes(1);
+    const jsx = await pageModule.default({ searchParams: {} });
+    const pageText = collectText(jsx).join(" ");
+
+    expect(pageText).toContain("Applications Are Closed");
+    expect(pageText).toContain("Applications are currently closed by the club.");
+    expect(pageText).toContain("Existing member renewal");
+  });
+
+  it("renders the application flow when applications are open", async () => {
+    getCurrentPublicApplicationState.mockResolvedValue({
+      membershipYear: {
+        id: "year_1",
+        year: 2026,
+      },
+      decision: {
+        allowed: true,
+        reasonCode: "OPEN",
+        message: "Applications are open.",
+        signupDay: new Date("2026-02-07T12:00:00-05:00"),
+        gateStartsAt: null,
+        gateEndsAt: null,
+      },
+    });
+
+    const pageModule = await import("@/app/apply/page");
+    const jsx = await pageModule.default({ searchParams: {} });
+    const pageText = collectText(jsx).join(" ");
+
+    expect(pageText).toContain("New Member Application");
+    expect(pageText).toContain("How This Works");
+    expect(pageText).toContain("Step 1: Applicant Account");
   });
 });
+

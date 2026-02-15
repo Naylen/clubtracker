@@ -160,6 +160,11 @@ export async function getMemberPortalState(input: {
           ? `Application denied: ${application.denialReason}`
           : "Application denied. Contact the club for next steps.",
       };
+    } else if (application?.status === "APPROVED" && !application.assignedPricingTier) {
+      cta = {
+        type: "awaiting_approval",
+        message: "Application approved. Awaiting pricing tier assignment before payment is available.",
+      };
     } else if (alreadyRenewed) {
       cta = { type: "none", message: "Your membership is already active for this year." };
     } else if (renewalBlocked) {

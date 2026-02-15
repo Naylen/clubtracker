@@ -87,6 +87,7 @@ export default async function ApplicationDetailPage({
     applicantDob: application.applicantDob,
     signupDay,
     requestedDisabledVeteranDiscount: application.requestedDisabledVeteranDiscount,
+    availableTiers: tiers,
   });
   const ageOnSignupDay = reviewState.ageOnSignupDay;
   const seniorAutoEligible = reviewState.seniorAutoEligible;
@@ -264,6 +265,9 @@ export default async function ApplicationDetailPage({
               <StatusBadge tone="info">PAYMENT_AVAILABLE</StatusBadge>
             ) : null}
             {seniorAutoEligible ? <StatusBadge tone="info">Auto: Senior</StatusBadge> : null}
+            {application.requestedDisabledVeteranDiscount ? (
+              <StatusBadge tone="info">DV Requested</StatusBadge>
+            ) : null}
           </div>
 
           <h2 className="mt-4 text-xl font-semibold">Applicant Details</h2>

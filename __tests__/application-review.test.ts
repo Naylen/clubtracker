@@ -24,4 +24,15 @@ describe("application review tier and senior badge logic", () => {
     expect(state.seniorAutoEligible).toBe(false);
     expect(state.suggestedTierCode).toBe("DISABLED_VETERAN");
   });
+
+  it("calculates age against signup day boundary (birthday on signup day counts)", () => {
+    const state = deriveApplicationReviewState({
+      applicantDob: new Date("1961-02-07T00:00:00.000Z"),
+      signupDay: new Date("2026-02-07T12:00:00-05:00"),
+      requestedDisabledVeteranDiscount: false,
+    });
+
+    expect(state.ageOnSignupDay).toBe(65);
+    expect(state.seniorAutoEligible).toBe(true);
+  });
 });

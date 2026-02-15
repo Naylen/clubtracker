@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   createSessionToken,
@@ -12,6 +12,7 @@ import { MEMBER_DISCIPLINE_OPTIONS } from "@/lib/discipline";
 import {
   ApplicationFlowError,
   createApplicantAccountAndSubmit,
+  getCurrentPublicApplicationState,
   getCurrentOpenApplicationYear,
   submitApplicationForExistingAccount,
 } from "@/services/application-flow";
@@ -55,15 +56,16 @@ function labelForDiscipline(value: string): string {
   return value.charAt(0) + value.slice(1).toLowerCase();
 }
 
-async function getOpenApplicationYear() {
-  try {
-    return await getCurrentOpenApplicationYear();
-  } catch (error) {
-    if (error instanceof ApplicationFlowError && error.code === "APPLICATIONS_CLOSED") {
-      notFound();
-    }
-    throw error;
+function formatDateTime(date: Date | null): string | null {
+  if (!date) {
+    return null;
   }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "full",
+    timeStyle: "short",
+    timeZone: "America/New_York",
+  }).format(date);
 }
 
 export default async function ApplyPage({ searchParams }: { searchParams: SearchParams }) {
@@ -83,7 +85,64 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
     );
   }
 
-  const membershipYear = await getOpenApplicationYear();
+  const applyState = await getCurrentPublicApplicationState();
+  const membershipYear = applyState.membershipYear;
+
+  if (!membershipYear || !applyState.decision.allowed) {
+    const signupDayText = formatDateTime(applyState.decision.signupDay);
+    const gateStartText = formatDateTime(applyState.decision.gateStartsAt);
+    const gateEndText = formatDateTime(applyState.decision.gateEndsAt);
+
+    return (
+      <main className="mx-auto max-w-3xl space-y-6 p-6">
+        <PageHeader
+          subtitle="Public applications are currently unavailable."
+          title="Applications Are Closed"
+        />
+        {searchParams.error ? (
+          <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+            {searchParams.error}
+          </p>
+        ) : null}
+
+        <section className="rounded-xl border bg-white p-6 shadow-sm">
+          <p className="text-sm text-gray-700">{applyState.decision.message}</p>
+          {signupDayText ? (
+            <p className="mt-3 text-sm text-gray-700">
+              Signup day: <span className="font-medium">{signupDayText}</span>
+            </p>
+          ) : null}
+          {gateStartText || gateEndText ? (
+            <p className="mt-2 text-sm text-gray-700">
+              Signup day gate window:{" "}
+              <span className="font-medium">
+                {gateStartText ?? "Not set"} - {gateEndText ?? "Not set"}
+              </span>
+            </p>
+          ) : null}
+        </section>
+
+        <section className="rounded-xl border border-blue-200 bg-blue-50 p-6 shadow-sm">
+          <h2 className="text-base font-semibold text-blue-900">Existing member renewal</h2>
+          <p className="mt-2 text-sm text-blue-900">
+            If you are an existing member, renew through the member portal after signing in.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link
+              className="rounded bg-blue-900 px-4 py-2 text-sm font-medium text-white"
+              href="/login?next=%2Fportal"
+            >
+              Log In
+            </Link>
+            <Link className="rounded border border-blue-300 px-4 py-2 text-sm font-medium" href="/">
+              Return Home
+            </Link>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   const currentUser = await getCurrentUser();
 
   if (currentUser?.role === "ADMIN") {
@@ -106,7 +165,7 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
         })
       : 0;
 
-  if (member && activeEnrollmentCount > 0) {
+  if (member && (member.status === "ACTIVE" || activeEnrollmentCount > 0)) {
     redirect("/portal");
   }
 
@@ -127,7 +186,15 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
   async function createAccountAndSubmitAction(formData: FormData) {
     "use server";
 
-    const openYear = await getOpenApplicationYear();
+    let openYear: { id: string };
+    try {
+      openYear = await getCurrentOpenApplicationYear();
+    } catch (error) {
+      if (error instanceof ApplicationFlowError && error.code === "APPLICATIONS_CLOSED") {
+        redirect(`/apply?error=${encodeURIComponent(error.message)}`);
+      }
+      throw error;
+    }
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     const firstName = String(formData.get("firstName") ?? "").trim();
@@ -198,7 +265,15 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
       redirect("/forbidden");
     }
 
-    const openYear = await getOpenApplicationYear();
+    let openYear: { id: string };
+    try {
+      openYear = await getCurrentOpenApplicationYear();
+    } catch (error) {
+      if (error instanceof ApplicationFlowError && error.code === "APPLICATIONS_CLOSED") {
+        redirect(`/apply?error=${encodeURIComponent(error.message)}`);
+      }
+      throw error;
+    }
     const firstName = String(formData.get("firstName") ?? "").trim();
     const lastName = String(formData.get("lastName") ?? "").trim();
     const phone = String(formData.get("phone") ?? "").trim() || null;

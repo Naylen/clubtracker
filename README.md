@@ -214,6 +214,18 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 | `/admin/members/import` | Admin CSV member import (preview + confirm) |
 | `/api/health` | Health check endpoint (JSON) |
 
+## New-Member Applications (P1 Rules)
+
+- `/apply` is only for **new member applications**.
+- Existing active members are redirected to `/portal` for renewals.
+- Public `/apply` availability is controlled from `Admin -> Settings -> Application Settings`:
+  - `Applications Open (Public /apply)` toggle
+  - Optional public open/close dates
+  - Optional `Signup Day Gate` window (or defaults to signup day 00:00-23:59 America/New_York)
+- Applicants can request disabled-veteran discount, but cannot choose pricing tiers.
+- Admin must approve application and assign a pricing tier before payment is available.
+- Stripe checkout uses the assigned tier amount for approved applications.
+
 ### If You Cannot Log In As Admin
 
 Use admin bootstrap to recover access without wiping the database:
