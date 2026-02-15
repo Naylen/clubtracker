@@ -17,6 +17,7 @@ export type MembershipYearSettingsResponse = {
   discountPriceCents: number;
   signupEnabled: boolean;
   signupDate: string | null;
+  applicationEnabled: boolean;
 };
 
 type MembershipYearSettingsUpdateInput = {
@@ -27,6 +28,7 @@ type MembershipYearSettingsUpdateInput = {
   discountPriceCents?: number;
   signupEnabled?: boolean;
   signupDate?: string | null;
+  applicationEnabled?: boolean;
 };
 
 function ensureValidYear(year: number): number {
@@ -79,6 +81,7 @@ function toSettingsResponse(input: {
   discountPriceCents: number;
   signupEnabled: boolean;
   signupDate: Date | null;
+  applicationEnabled: boolean;
 }): MembershipYearSettingsResponse {
   return {
     id: input.id,
@@ -92,6 +95,7 @@ function toSettingsResponse(input: {
     discountPriceCents: input.discountPriceCents,
     signupEnabled: input.signupEnabled,
     signupDate: input.signupDate?.toISOString() ?? null,
+    applicationEnabled: input.applicationEnabled,
   };
 }
 
@@ -131,6 +135,10 @@ export async function updateMembershipYearSettings(input: {
       : current.discountPriceCents;
   const signupEnabled =
     input.data.signupEnabled !== undefined ? Boolean(input.data.signupEnabled) : current.signupEnabled;
+  const applicationEnabled =
+    input.data.applicationEnabled !== undefined
+      ? Boolean(input.data.applicationEnabled)
+      : current.applicationEnabled;
   const signupDate =
     input.data.signupDate === undefined
       ? current.signupDate
@@ -180,6 +188,7 @@ export async function updateMembershipYearSettings(input: {
       discountPriceCents,
       signupEnabled,
       signupDate,
+      applicationEnabled,
     },
   });
 

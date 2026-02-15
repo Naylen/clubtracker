@@ -12,6 +12,7 @@ type MembershipYearSettings = {
   discountPriceCents: number;
   signupEnabled: boolean;
   signupDate: string | null;
+  applicationEnabled: boolean;
 };
 
 type ToastState = {
@@ -63,6 +64,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
   const [discountPriceDollars, setDiscountPriceDollars] = useState("100.00");
   const [signupEnabled, setSignupEnabled] = useState(true);
   const [signupDate, setSignupDate] = useState("");
+  const [applicationEnabled, setApplicationEnabled] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("renewal");
   const [errors, setErrors] = useState<FormErrors>({});
   const [toast, setToast] = useState<ToastState>(null);
@@ -101,6 +103,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     setDiscountPriceDollars(centsToDollars(settings.discountPriceCents));
     setSignupEnabled(settings.signupEnabled);
     setSignupDate(settings.signupDate ? toNyDateInput(settings.signupDate) : "");
+    setApplicationEnabled(settings.applicationEnabled);
     setErrors({});
   }
 
@@ -193,6 +196,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
           discountPriceCents: dollarsToCents(discountPriceDollars),
           signupEnabled,
           signupDate: signupDate || null,
+          applicationEnabled,
         }),
       });
 
@@ -370,6 +374,15 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
                 type="checkbox"
               />
               Signup day enabled
+            </label>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                checked={applicationEnabled}
+                onChange={(event) => setApplicationEnabled(event.target.checked)}
+                type="checkbox"
+              />
+              Applications open
             </label>
 
             <label className="text-sm">

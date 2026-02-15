@@ -58,6 +58,7 @@ export async function PUT(request: NextRequest) {
       discountPriceCents?: number;
       signupEnabled?: boolean;
       signupDate?: string | null;
+      applicationEnabled?: boolean;
     };
 
     const membershipYear = await updateMembershipYearSettings({

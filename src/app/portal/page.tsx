@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { requireCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -36,6 +37,19 @@ export default async function MemberPortalPage() {
         },
       })
     : null;
+  const application = membershipYear
+    ? await prisma.membershipApplication.findUnique({
+        where: {
+          memberId_membershipYearId: {
+            memberId: user.memberId,
+            membershipYearId: membershipYear.id,
+          },
+        },
+        include: {
+          assignedPricingTier: true,
+        },
+      })
+    : null;
 
   const price =
     member && membershipYear ? getRenewalPriceForMember(member, membershipYear) : null;
@@ -66,6 +80,41 @@ export default async function MemberPortalPage() {
           </button>
         </form>
       </div>
+
+      <section className="rounded border bg-white p-6">
+        <h2 className="mb-4 text-xl font-semibold">Application Status</h2>
+
+        {membershipYear ? (
+          <div className="mb-6 space-y-2 text-sm">
+            <p>
+              <span className="font-medium">Applications:</span>{" "}
+              {membershipYear.applicationEnabled ? "Open" : "Closed"}
+            </p>
+            <p>
+              <span className="font-medium">Your status:</span>{" "}
+              {application ? application.status : "NOT_SUBMITTED"}
+            </p>
+            {application?.assignedPricingTier ? (
+              <p>
+                <span className="font-medium">Assigned Tier:</span>{" "}
+                {application.assignedPricingTier.name} (
+                {formatCurrency(application.assignedPricingTier.amountCents)})
+              </p>
+            ) : null}
+            {application?.status === "DENIED" && application.denialReason ? (
+              <p className="text-red-700">
+                <span className="font-medium">Denial reason:</span> {application.denialReason}
+              </p>
+            ) : null}
+            {membershipYear.applicationEnabled && application?.status !== "APPROVED" ? (
+              <Link className="inline-block rounded border px-3 py-1.5 text-sm" href="/apply">
+                {application ? "Update Application" : "Start Application"}
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
+
+      </section>
 
       <section className="rounded border bg-white p-6">
         <h2 className="mb-4 text-xl font-semibold">Current Membership</h2>
