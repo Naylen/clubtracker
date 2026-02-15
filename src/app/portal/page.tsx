@@ -4,7 +4,6 @@ import { requireCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import {
   getLateRenewalPolicy,
-  getRenewalPriceForMember,
   isRenewalBlockedByLatePolicy,
 } from "@/services/membership";
 import { PayRenewalButton } from "./pay-renewal-button";
@@ -51,19 +50,33 @@ export default async function MemberPortalPage() {
       })
     : null;
 
-  const price =
-    member && membershipYear ? getRenewalPriceForMember(member, membershipYear) : null;
+  const price = application?.assignedPricingTier ?? null;
   const lateRenewalPolicy = await getLateRenewalPolicy();
   const renewalBlocked = membershipYear
     ? await isRenewalBlockedByLatePolicy({ membershipYear })
     : false;
 
   const alreadyRenewed = enrollment?.status === "ACTIVE";
-  const canPay = Boolean(member && membershipYear && !alreadyRenewed && !renewalBlocked);
+  const applicationApproved = application?.status === "APPROVED" && Boolean(application.assignedPricingTier);
+  const canPay = Boolean(
+    member && membershipYear && applicationApproved && !alreadyRenewed && !renewalBlocked
+  );
 
   let disabledReason = "";
   if (!membershipYear) {
     disabledReason = `Membership year ${currentYear} has not been opened yet.`;
+  } else if (!application) {
+    disabledReason = "Submit your application before payment is available.";
+  } else if (application.status === "SUBMITTED") {
+    disabledReason = "Awaiting admin approval before payment is available.";
+  } else if (application.status === "DENIED") {
+    disabledReason = application.denialReason
+      ? `Application denied: ${application.denialReason}`
+      : "Application denied.";
+  } else if (application.status !== "APPROVED") {
+    disabledReason = "Application must be approved before payment is available.";
+  } else if (!application.assignedPricingTier) {
+    disabledReason = "Awaiting pricing tier assignment.";
   } else if (alreadyRenewed) {
     disabledReason = "Your renewal is already paid and active for this year.";
   } else if (renewalBlocked) {
@@ -144,8 +157,7 @@ export default async function MemberPortalPage() {
                   {formatCurrency(price.amountCents)}
                 </p>
                 <p>
-                  <span className="font-medium">Discount:</span>{" "}
-                  {price.discountReason ?? "NONE"}
+                  <span className="font-medium">Pricing Tier:</span> {price.name} ({price.code})
                 </p>
               </>
             ) : null}

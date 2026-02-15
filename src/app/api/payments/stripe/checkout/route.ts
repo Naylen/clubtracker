@@ -3,7 +3,7 @@ import { getUserFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import {
-  getRenewalPriceForMember,
+  countActiveEnrollments,
   isRenewalBlockedByLatePolicy,
 } from "@/services/membership";
 import { stripePaymentService } from "@/services/payment";
@@ -41,26 +41,72 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const enrollment = await prisma.membershipEnrollment.upsert({
+  const application = await prisma.membershipApplication.findUnique({
     where: {
       memberId_membershipYearId: {
         memberId: member.id,
         membershipYearId: membershipYear.id,
       },
     },
-    update: {},
-    create: {
-      memberId: member.id,
-      membershipYearId: membershipYear.id,
-      status: "PENDING_RENEWAL",
+    include: {
+      assignedPricingTier: true,
     },
   });
 
-  if (enrollment.status === "ACTIVE") {
+  if (!application) {
+    return NextResponse.json(
+      { error: "No application found. Submit an application before payment." },
+      { status: 409 }
+    );
+  }
+
+  if (application.status !== "APPROVED") {
+    const statusMessages: Record<string, string> = {
+      DRAFT: "Your application is still in draft. Submit it for review first.",
+      SUBMITTED: "Awaiting admin approval before payment is available.",
+      DENIED: application.denialReason
+        ? `Application denied: ${application.denialReason}`
+        : "Application denied. Contact an administrator for details.",
+    };
+    return NextResponse.json(
+      {
+        error: statusMessages[application.status] ?? "Application is not approved yet.",
+      },
+      { status: 409 }
+    );
+  }
+
+  if (!application.assignedPricingTier || !application.assignedPricingTier.isActive) {
+    return NextResponse.json(
+      { error: "No active pricing tier is assigned to this application." },
+      { status: 409 }
+    );
+  }
+
+  const existingEnrollment = await prisma.membershipEnrollment.findUnique({
+    where: {
+      memberId_membershipYearId: {
+        memberId: member.id,
+        membershipYearId: membershipYear.id,
+      },
+    },
+  });
+
+  if (existingEnrollment?.status === "ACTIVE") {
     return NextResponse.json(
       {
         error:
           "Your renewal for the current year is already active. No payment session was created.",
+      },
+      { status: 409 }
+    );
+  }
+
+  const activeEnrollments = await countActiveEnrollments(membershipYear.id);
+  if (activeEnrollments >= membershipYear.membershipCap) {
+    return NextResponse.json(
+      {
+        error: "Membership capacity for this year is full.",
       },
       { status: 409 }
     );
@@ -77,7 +123,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const pricing = getRenewalPriceForMember(member, membershipYear);
+  const enrollment = await prisma.membershipEnrollment.upsert({
+    where: {
+      memberId_membershipYearId: {
+        memberId: member.id,
+        membershipYearId: membershipYear.id,
+      },
+    },
+    update: {},
+    create: {
+      memberId: member.id,
+      membershipYearId: membershipYear.id,
+      status: "PENDING_RENEWAL",
+    },
+  });
+
   const successUrl = `${request.nextUrl.origin}/pay/success?session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${request.nextUrl.origin}/pay/cancel`;
 
@@ -86,8 +146,8 @@ export async function POST(request: NextRequest) {
     membershipYearId: membershipYear.id,
     membershipYear: membershipYear.year,
     enrollmentId: enrollment.id,
-    amountCents: pricing.amountCents,
-    discountReason: pricing.discountReason,
+    amountCents: application.assignedPricingTier.amountCents,
+    discountReason: application.assignedPricingTier.code,
     successUrl,
     cancelUrl,
   });
@@ -103,7 +163,7 @@ export async function POST(request: NextRequest) {
   await prisma.payment.create({
     data: {
       provider: "STRIPE",
-      amountCents: pricing.amountCents,
+      amountCents: application.assignedPricingTier.amountCents,
       status: "CREATED",
       externalId: checkout.sessionId,
       memberId: member.id,

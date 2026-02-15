@@ -72,6 +72,7 @@ describe("Membership settings admin API RBAC", () => {
       discountPriceCents: 10000,
       signupEnabled: true,
       signupDate: "2026-02-01T14:00:00.000Z",
+      applicationEnabled: false,
     });
 
     const { GET } = await import("@/app/api/admin/membership-year/route");
