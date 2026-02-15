@@ -100,6 +100,21 @@ Seed requires an up-to-date schema, so run migrations first.
 
 - Error like `unexpected character '"'` or odd shell parsing: verify `.env` values are valid dotenv format, quote values with spaces (`EMAIL_FROM`), and fix Windows line endings if needed (`^M`/CRLF issues).
 - DB connection refused from app container: inside container, `localhost` points to itself. Use `DATABASE_URL=postgresql://...@db:5432/...`.
+- Error like `Cannot find module '../xxx.js'` (missing Next.js chunk): stale `.next` artifacts were mixed across runs/profiles. Reset with:
+
+```bash
+docker compose down -v
+npm run docker:reset
+docker compose up --build -d
+```
+
+or on PowerShell without npm script:
+
+```powershell
+docker compose down -v
+if (Test-Path .next) { Remove-Item -Recurse -Force .next }
+docker compose up --build -d
+```
 
 ## Docker (Prod-like)
 
@@ -123,6 +138,14 @@ docker compose --profile prod up --build -d db app-prod
 docker compose --profile prod exec app-prod npx prisma migrate deploy
 docker compose --profile prod exec app-prod npx prisma db seed
 docker compose --profile prod exec app-prod npm run admin:bootstrap
+```
+
+Quick prod-like bootstrap sequence:
+
+```bash
+docker compose --profile prod up --build -d db app-prod
+docker compose --profile prod exec app-prod npx prisma migrate deploy
+docker compose --profile prod exec app-prod npx prisma db seed
 ```
 
 ## Reset DB
@@ -167,8 +190,10 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 | `npm run db:studio` | Open Prisma Studio (DB GUI) |
 | `npm run docker:dev` | Docker Compose dev up/build |
 | `npm run docker:prod` | Docker Compose prod target up/build |
+| `npm run docker:up` | Docker Compose up/build in background (default dev app + db) |
 | `npm run docker:down` | Docker Compose down |
 | `npm run docker:down:volumes` | Docker Compose down and remove volumes |
+| `npm run docker:reset` | Remove compose containers/volumes and delete local `.next` |
 
 ## Key Routes
 
