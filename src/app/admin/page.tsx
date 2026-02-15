@@ -2,7 +2,7 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { createOrOpenCurrentYear } from "@/services/membership";
 import { getCurrentYearOperationalState } from "@/services/operations-state";
@@ -76,20 +76,19 @@ export default async function AdminDashboardPage() {
     : 0;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        actions={
-          <form action={createOrOpenYearAction}>
-            <button className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white" type="submit">
-              Create / Open Current Year
-            </button>
-          </form>
-        }
-        subtitle="Live operational snapshot for the current membership year."
-        title="Control Center"
-      />
+    <PageShell
+      actions={
+        <form action={createOrOpenYearAction}>
+          <button className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white" type="submit">
+            Create / Open Current Year
+          </button>
+        </form>
+      }
+      subtitle="Live operational snapshot for the current membership year."
+      title="Control Center"
+    >
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-5">
         <article className="rounded-xl border bg-white p-4 shadow-sm">
           <p className="text-xs uppercase tracking-wide text-gray-500">Current Year</p>
           <p className="mt-2 text-2xl font-bold">{state.year}</p>
@@ -158,7 +157,7 @@ export default async function AdminDashboardPage() {
         </article>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-5">
         <ActionTile
           count={state.pendingApplications}
           href="/admin/applications?status=SUBMITTED"
@@ -190,7 +189,7 @@ export default async function AdminDashboardPage() {
           </ul>
         )}
       </section>
-    </div>
+    </PageShell>
   );
 }
 

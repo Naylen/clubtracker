@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { PageShell } from "@/components/ui/page-shell";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 
 function formatCurrency(amountCents: number): string {
@@ -48,9 +50,8 @@ export default async function AdminPaymentsPage({
   });
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Payments</h1>
+    <PageShell
+      actions={
         <div className="text-sm">
           {showCurrentOnly ? (
             <Link className="underline" href="/admin/payments?scope=all">
@@ -62,11 +63,14 @@ export default async function AdminPaymentsPage({
             </Link>
           )}
         </div>
-      </div>
+      }
+      subtitle="Recent payment activity across membership years."
+      title="Payments"
+    >
 
-      <div className="overflow-x-auto rounded border bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-100 text-left">
+      <section className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+        <table className="min-w-full text-left text-sm">
+          <thead className="border-b bg-gray-50 text-xs uppercase text-gray-600">
             <tr>
               <th className="px-3 py-2">Year</th>
               <th className="px-3 py-2">Member</th>
@@ -79,12 +83,24 @@ export default async function AdminPaymentsPage({
           </thead>
           <tbody>
             {payments.map((payment) => (
-              <tr className="border-t" key={payment.id}>
+              <tr className="border-b transition hover:bg-gray-50" key={payment.id}>
                 <td className="px-3 py-2">{payment.membershipYear.year}</td>
                 <td className="px-3 py-2">{payment.member.name}</td>
                 <td className="px-3 py-2">{payment.member.email}</td>
                 <td className="px-3 py-2">{formatCurrency(payment.amountCents)}</td>
-                <td className="px-3 py-2">{payment.status}</td>
+                <td className="px-3 py-2">
+                  <StatusBadge
+                    tone={
+                      payment.status === "SUCCEEDED"
+                        ? "success"
+                        : payment.status === "FAILED" || payment.status === "REFUNDED"
+                          ? "danger"
+                          : "info"
+                    }
+                  >
+                    {payment.status}
+                  </StatusBadge>
+                </td>
                 <td className="px-3 py-2">{payment.createdAt.toLocaleString()}</td>
                 <td className="px-3 py-2">
                   {payment.paidAt ? payment.paidAt.toLocaleString() : "-"}
@@ -100,7 +116,7 @@ export default async function AdminPaymentsPage({
             ) : null}
           </tbody>
         </table>
-      </div>
-    </div>
+      </section>
+    </PageShell>
   );
 }

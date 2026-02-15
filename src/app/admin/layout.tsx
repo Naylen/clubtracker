@@ -1,4 +1,5 @@
 import { requireAdmin } from "@/lib/auth";
+import { Container } from "@/components/ui/container";
 
 export default async function AdminLayout({
   children,
@@ -10,7 +11,7 @@ export default async function AdminLayout({
   return (
     <div className="min-h-[calc(100vh-65px)] bg-gray-50">
       <div className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+        <Container className="flex items-center justify-between py-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
               Admin Operations Console
@@ -20,9 +21,9 @@ export default async function AdminLayout({
             </p>
           </div>
           <p className="text-xs text-gray-500">{user.email}</p>
-        </div>
+        </Container>
       </div>
-      <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+      <main className="space-y-6 py-6">{children}</main>
     </div>
   );
 }

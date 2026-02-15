@@ -5,6 +5,7 @@ import {
   MAX_BROADCAST_RECIPIENTS,
   sendBroadcastEmail,
 } from "@/services/communication";
+import { PageShell } from "@/components/ui/page-shell";
 
 function parseAudience(value: string): BroadcastAudience {
   return value === "ALL_ACTIVE_MEMBERS" ? "ALL_ACTIVE_MEMBERS" : "CURRENT_YEAR_ACTIVE";
@@ -49,8 +50,10 @@ export default async function AdminCommunicationsPage({
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Communications</h1>
+    <PageShell
+      subtitle={`Broadcast to active members (safety cap: ${MAX_BROADCAST_RECIPIENTS} recipients).`}
+      title="Communications"
+    >
 
       {searchParams.error ? (
         <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
@@ -64,7 +67,7 @@ export default async function AdminCommunicationsPage({
         </p>
       ) : null}
 
-      <section className="rounded border bg-white p-6">
+      <section className="rounded-xl border bg-white p-6 shadow-sm">
         <form action={sendBroadcastAction} className="space-y-4">
           <label className="block text-sm font-medium">
             Audience
@@ -89,6 +92,6 @@ export default async function AdminCommunicationsPage({
           </button>
         </form>
       </section>
-    </div>
+    </PageShell>
   );
 }
