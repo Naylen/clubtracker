@@ -8,8 +8,9 @@ import {
   getCurrentYearInNewYork,
   isSeniorOnDate,
 } from "@/lib/membership-dates";
-import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { getApplicationWindow, isApplicationOpenNow } from "@/services/operations-state";
 
 type SearchParams = {
   year?: string;
@@ -64,7 +65,7 @@ export default async function AdminApplicationsPage({
 
   const membershipYear = await prisma.membershipYear.findUnique({
     where: { year: selectedYear },
-    select: { id: true, year: true, signupDate: true },
+    select: { id: true, year: true, signupDate: true, applicationEnabled: true },
   });
 
   const applications = membershipYear
@@ -96,13 +97,16 @@ export default async function AdminApplicationsPage({
   const signupDay = membershipYear
     ? determineSignupDay({ year: membershipYear.year, signupDate: membershipYear.signupDate })
     : null;
+  const applicationWindow = membershipYear ? await getApplicationWindow(membershipYear.year) : null;
+  const applicationsOpen = membershipYear
+    ? isApplicationOpenNow({ membershipYear, window: applicationWindow ?? { opensAt: null, closesAt: null } })
+    : false;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        subtitle="Review submitted applications and decide approval, pricing tier, and discount outcomes."
-        title="Membership Applications"
-      />
+    <PageShell
+      subtitle="Review submitted applications and decide approval, pricing tier, and discount outcomes."
+      title="Membership Applications"
+    >
 
       <section className="rounded-xl border bg-white p-5 shadow-sm">
         <form className="flex flex-wrap items-end gap-3" method="get">
@@ -137,11 +141,35 @@ export default async function AdminApplicationsPage({
         {!membershipYear ? (
           <p className="text-sm text-gray-600">No membership year record exists for {selectedYear}.</p>
         ) : applications.length === 0 ? (
-          <p className="text-sm text-gray-600">No applications match the selected filters.</p>
+          <div className="rounded-xl border border-dashed bg-gray-50 p-6 text-sm">
+            <p className="text-base font-semibold text-gray-900">No applications yet</p>
+            {applicationsOpen ? (
+              <>
+                <p className="mt-1 text-gray-700">
+                  Applications are open. Share <span className="rounded bg-gray-200 px-1 py-0.5 font-mono">/apply</span>{" "}
+                  when you are ready for submissions.
+                </p>
+                <p className="mt-2 text-gray-600">No submissions match this filter right now.</p>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 text-gray-700">
+                  Applications are closed. Open them in Settings to allow public access to{" "}
+                  <span className="rounded bg-gray-200 px-1 py-0.5 font-mono">/apply</span>.
+                </p>
+                <Link
+                  className="mt-4 inline-flex rounded border px-3 py-1.5 text-xs font-medium hover:bg-white"
+                  href="/admin/settings?tab=application_settings"
+                >
+                  Go to Application Settings
+                </Link>
+              </>
+            )}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
-              <thead className="border-b text-xs uppercase text-gray-600">
+              <thead className="border-b bg-gray-50 text-xs uppercase text-gray-600">
                 <tr>
                   <th className="px-3 py-2">Name</th>
                   <th className="px-3 py-2">Age on Signup Day</th>
@@ -163,7 +191,7 @@ export default async function AdminApplicationsPage({
                       : false;
 
                   return (
-                    <tr className="border-b" key={application.id}>
+                    <tr className="border-b transition hover:bg-gray-50" key={application.id}>
                       <td className="px-3 py-2">
                         <div className="font-medium">
                           {application.applicantFirstName} {application.applicantLastName}
@@ -208,6 +236,6 @@ export default async function AdminApplicationsPage({
           </div>
         )}
       </section>
-    </div>
+    </PageShell>
   );
 }

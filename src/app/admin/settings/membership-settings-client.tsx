@@ -48,6 +48,27 @@ type TierDraft = {
   priority: string;
 };
 
+type MembershipDraft = {
+  membershipCap: string;
+  renewalOpensAt: string;
+  renewalDueAt: string;
+  lateRenewalsEnabled: boolean;
+  lateRenewalPolicyNotes: string;
+  applicationEnabled: boolean;
+  applicationOpensAt: string;
+  applicationClosesAt: string;
+  signupEnabled: boolean;
+  signupDate: string;
+};
+
+const TAB_KEYS: ActiveTab[] = [
+  "membership_year",
+  "pricing_tiers",
+  "application_settings",
+  "renewal_settings",
+  "signup_day",
+];
+
 function toNyDateInput(isoDate: string | null): string {
   if (!isoDate) {
     return "";
@@ -88,7 +109,64 @@ function parseLocalDateForApi(value: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-export function MembershipSettingsClient({ initialYear }: { initialYear: number }) {
+function normalizeTab(tab: string | undefined): ActiveTab {
+  if (tab && TAB_KEYS.includes(tab as ActiveTab)) {
+    return tab as ActiveTab;
+  }
+  return "membership_year";
+}
+
+function tierToDraft(tier: PricingTier): TierDraft {
+  return {
+    code: tier.code,
+    name: tier.name,
+    amountDollars: centsToDollars(tier.amountCents),
+    isActive: tier.isActive,
+    priority: String(tier.priority),
+  };
+}
+
+function buildMembershipDraft(state: MembershipDraft): MembershipDraft {
+  return {
+    ...state,
+    lateRenewalPolicyNotes: state.lateRenewalPolicyNotes.trim(),
+    applicationOpensAt: state.applicationOpensAt.trim(),
+    applicationClosesAt: state.applicationClosesAt.trim(),
+    signupDate: state.signupDate.trim(),
+  };
+}
+
+function areMembershipDraftsEqual(left: MembershipDraft | null, right: MembershipDraft): boolean {
+  if (!left) {
+    return false;
+  }
+
+  const normalizedLeft = buildMembershipDraft(left);
+  const normalizedRight = buildMembershipDraft(right);
+  return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
+}
+
+function isTierDirty(tier: PricingTier, draft: TierDraft | undefined): boolean {
+  if (!draft) {
+    return false;
+  }
+
+  return (
+    normalizeTierCode(draft.code) !== tier.code ||
+    draft.name.trim() !== tier.name ||
+    dollarsToCents(draft.amountDollars) !== tier.amountCents ||
+    draft.isActive !== tier.isActive ||
+    Number(draft.priority) !== tier.priority
+  );
+}
+
+export function MembershipSettingsClient({
+  initialYear,
+  initialTab,
+}: {
+  initialYear: number;
+  initialTab?: string;
+}) {
   const [year, setYear] = useState(initialYear);
   const [loadedYear, setLoadedYear] = useState(initialYear);
   const [membershipCap, setMembershipCap] = useState("350");
@@ -108,10 +186,13 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
   const [signupDate, setSignupDate] = useState("");
 
   const [pricingTiers, setPricingTiers] = useState<PricingTier[]>([]);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("membership_year");
+  const [tierDrafts, setTierDrafts] = useState<Record<string, TierDraft>>({});
+
+  const [activeTab, setActiveTab] = useState<ActiveTab>(normalizeTab(initialTab));
   const [toast, setToast] = useState<ToastState>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
   const [newTier, setNewTier] = useState<TierDraft>({
     code: "",
     name: "",
@@ -119,6 +200,12 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     isActive: true,
     priority: "100",
   });
+
+  const [membershipBaseline, setMembershipBaseline] = useState<MembershipDraft | null>(null);
+
+  useEffect(() => {
+    setActiveTab(normalizeTab(initialTab));
+  }, [initialTab]);
 
   useEffect(() => {
     void loadYear(initialYear);
@@ -129,7 +216,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     if (!toast) {
       return;
     }
-    const timeout = setTimeout(() => setToast(null), 4000);
+    const timeout = setTimeout(() => setToast(null), 3500);
     return () => clearTimeout(timeout);
   }, [toast]);
 
@@ -144,23 +231,78 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     []
   );
 
+  const currentMembershipDraft: MembershipDraft = {
+    membershipCap,
+    renewalOpensAt,
+    renewalDueAt,
+    lateRenewalsEnabled,
+    lateRenewalPolicyNotes,
+    applicationEnabled,
+    applicationOpensAt,
+    applicationClosesAt,
+    signupEnabled,
+    signupDate,
+  };
+
+  const membershipDirty = useMemo(
+    () =>
+      membershipBaseline
+        ? !areMembershipDraftsEqual(membershipBaseline, currentMembershipDraft)
+        : false,
+    [membershipBaseline, currentMembershipDraft]
+  );
+
+  const dirtyTierIds = useMemo(
+    () =>
+      pricingTiers
+        .filter((tier) => isTierDirty(tier, tierDrafts[tier.id]))
+        .map((tier) => tier.id),
+    [pricingTiers, tierDrafts]
+  );
+
+  const hasUnsavedChanges = membershipDirty || dirtyTierIds.length > 0;
+
+  const dirtySummary = useMemo(() => {
+    const parts: string[] = [];
+    if (membershipDirty) {
+      parts.push("Membership settings");
+    }
+    if (dirtyTierIds.length > 0) {
+      parts.push(`Pricing tiers (${dirtyTierIds.length})`);
+    }
+    return parts.join(" and ");
+  }, [membershipDirty, dirtyTierIds.length]);
+
   function applySettings(settings: MembershipYearSettings) {
+    const nextDraft: MembershipDraft = {
+      membershipCap: String(settings.membershipCap),
+      renewalOpensAt: toNyDateInput(settings.renewalOpensAt),
+      renewalDueAt: toNyDateInput(settings.renewalDueAt),
+      lateRenewalsEnabled: settings.lateRenewalsEnabled,
+      lateRenewalPolicyNotes: settings.lateRenewalPolicyNotes,
+      applicationEnabled: settings.applicationEnabled,
+      applicationOpensAt: toNyDateInput(settings.applicationOpensAt),
+      applicationClosesAt: toNyDateInput(settings.applicationClosesAt),
+      signupEnabled: settings.signupEnabled,
+      signupDate: toNyDateInput(settings.signupDate),
+    };
+
     setLoadedYear(settings.year);
-    setMembershipCap(String(settings.membershipCap));
     setActiveEnrollments(settings.activeEnrollments);
     setCapacityRemaining(settings.capacityRemaining);
 
-    setRenewalOpensAt(toNyDateInput(settings.renewalOpensAt));
-    setRenewalDueAt(toNyDateInput(settings.renewalDueAt));
-    setLateRenewalsEnabled(settings.lateRenewalsEnabled);
-    setLateRenewalPolicyNotes(settings.lateRenewalPolicyNotes);
+    setMembershipCap(nextDraft.membershipCap);
+    setRenewalOpensAt(nextDraft.renewalOpensAt);
+    setRenewalDueAt(nextDraft.renewalDueAt);
+    setLateRenewalsEnabled(nextDraft.lateRenewalsEnabled);
+    setLateRenewalPolicyNotes(nextDraft.lateRenewalPolicyNotes);
+    setApplicationEnabled(nextDraft.applicationEnabled);
+    setApplicationOpensAt(nextDraft.applicationOpensAt);
+    setApplicationClosesAt(nextDraft.applicationClosesAt);
+    setSignupEnabled(nextDraft.signupEnabled);
+    setSignupDate(nextDraft.signupDate);
 
-    setApplicationEnabled(settings.applicationEnabled);
-    setApplicationOpensAt(toNyDateInput(settings.applicationOpensAt));
-    setApplicationClosesAt(toNyDateInput(settings.applicationClosesAt));
-
-    setSignupEnabled(settings.signupEnabled);
-    setSignupDate(toNyDateInput(settings.signupDate));
+    setMembershipBaseline(nextDraft);
   }
 
   async function loadPricingTiers(targetYear: number) {
@@ -175,6 +317,9 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     }
 
     setPricingTiers(payload.pricingTiers);
+    setTierDrafts(
+      Object.fromEntries(payload.pricingTiers.map((tier) => [tier.id, tierToDraft(tier)]))
+    );
   }
 
   async function loadYear(targetYear: number) {
@@ -193,7 +338,6 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
 
       applySettings(payload.membershipYear);
       await loadPricingTiers(targetYear);
-      setToast({ tone: "success", message: `Loaded settings for ${payload.membershipYear.year}.` });
     } catch (error) {
       setToast({
         tone: "error",
@@ -204,40 +348,97 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     }
   }
 
-  async function saveYearSettings() {
+  async function saveMembershipSettingsIfDirty(): Promise<boolean> {
+    if (!membershipDirty) {
+      return false;
+    }
+
+    const parsedCap = Number(membershipCap);
+    if (!Number.isFinite(parsedCap)) {
+      throw new Error("Membership cap must be a valid number.");
+    }
+
+    const response = await fetch(`/api/admin/membership-year?year=${loadedYear}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        membershipCap: parsedCap,
+        renewalOpensAt,
+        renewalDueAt,
+        lateRenewalsEnabled,
+        lateRenewalPolicyNotes,
+        applicationEnabled,
+        applicationOpensAt: parseLocalDateForApi(applicationOpensAt),
+        applicationClosesAt: parseLocalDateForApi(applicationClosesAt),
+        signupEnabled,
+        signupDate: parseLocalDateForApi(signupDate),
+      }),
+    });
+
+    const payload = (await response.json()) as {
+      membershipYear?: MembershipYearSettings;
+      error?: string;
+    };
+
+    if (!response.ok || !payload.membershipYear) {
+      throw new Error(payload.error ?? "Could not save membership settings.");
+    }
+
+    applySettings(payload.membershipYear);
+    return true;
+  }
+
+  async function saveTierById(tierId: string): Promise<void> {
+    const draft = tierDrafts[tierId];
+    if (!draft) {
+      return;
+    }
+
+    const response = await fetch(`/api/admin/pricing-tiers/${tierId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        code: normalizeTierCode(draft.code),
+        name: draft.name.trim(),
+        amountCents: dollarsToCents(draft.amountDollars),
+        isActive: draft.isActive,
+        priority: Number(draft.priority),
+      }),
+    });
+
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Could not update pricing tier.");
+    }
+  }
+
+  async function saveAllChanges() {
+    if (!hasUnsavedChanges) {
+      return;
+    }
+
     setIsSaving(true);
 
     try {
-      const response = await fetch(`/api/admin/membership-year?year=${loadedYear}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          membershipCap: Number(membershipCap),
-          renewalOpensAt,
-          renewalDueAt,
-          lateRenewalsEnabled,
-          lateRenewalPolicyNotes,
-          applicationEnabled,
-          applicationOpensAt: parseLocalDateForApi(applicationOpensAt),
-          applicationClosesAt: parseLocalDateForApi(applicationClosesAt),
-          signupEnabled,
-          signupDate: parseLocalDateForApi(signupDate),
-        }),
-      });
+      const dirtyIds = [...dirtyTierIds];
+      const membershipSaved = await saveMembershipSettingsIfDirty();
 
-      const payload = (await response.json()) as {
-        membershipYear?: MembershipYearSettings;
-        error?: string;
-      };
-
-      if (!response.ok || !payload.membershipYear) {
-        throw new Error(payload.error ?? "Could not save membership settings.");
+      for (const tierId of dirtyIds) {
+        await saveTierById(tierId);
       }
 
-      applySettings(payload.membershipYear);
-      setToast({ tone: "success", message: "Membership year settings saved." });
+      if (dirtyIds.length > 0) {
+        await loadPricingTiers(loadedYear);
+      }
+
+      const changesSaved = membershipSaved || dirtyIds.length > 0;
+      if (changesSaved) {
+        setToast({ tone: "success", message: "Settings saved." });
+      }
     } catch (error) {
       setToast({
         tone: "error",
@@ -257,7 +458,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
         },
         body: JSON.stringify({
           code: normalizeTierCode(newTier.code),
-          name: newTier.name,
+          name: newTier.name.trim(),
           amountCents: dollarsToCents(newTier.amountDollars),
           isActive: newTier.isActive,
           priority: Number(newTier.priority),
@@ -285,57 +486,43 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     }
   }
 
-  async function saveTier(tierId: string, draft: TierDraft) {
-    try {
-      const response = await fetch(`/api/admin/pricing-tiers/${tierId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          code: normalizeTierCode(draft.code),
-          name: draft.name,
-          amountCents: dollarsToCents(draft.amountDollars),
-          isActive: draft.isActive,
-          priority: Number(draft.priority),
+  function updateTierDraft(tierId: string, patch: Partial<TierDraft>) {
+    setTierDrafts((current) => ({
+      ...current,
+      [tierId]: {
+        ...(current[tierId] ?? {
+          code: "",
+          name: "",
+          amountDollars: "0.00",
+          isActive: true,
+          priority: "100",
         }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Could not update pricing tier.");
-      }
-
-      await loadPricingTiers(loadedYear);
-      setToast({ tone: "success", message: "Pricing tier updated." });
-    } catch (error) {
-      setToast({
-        tone: "error",
-        message: error instanceof Error ? error.message : "Could not update pricing tier.",
-      });
-    }
+        ...patch,
+      },
+    }));
   }
 
-  async function disableTier(tier: PricingTier) {
-    await saveTier(tier.id, {
-      code: tier.code,
-      name: tier.name,
-      amountDollars: centsToDollars(tier.amountCents),
-      isActive: false,
-      priority: String(tier.priority),
-    });
+  function disableTierWithConfirm(tierId: string) {
+    const confirmed = window.confirm("Disable this pricing tier?");
+    if (!confirmed) {
+      return;
+    }
+    updateTierDraft(tierId, { isActive: false });
   }
 
   return (
     <div className="space-y-6">
       {toast ? (
-        <div
-          className={`rounded-lg border p-3 text-sm shadow-sm ${
-            toast.tone === "success"
-              ? "border-green-300 bg-green-50 text-green-800"
-              : "border-red-300 bg-red-50 text-red-800"
-          }`}
-        >
-          {toast.message}
+        <div className="fixed right-4 top-20 z-50">
+          <div
+            className={`rounded-lg border px-4 py-3 text-sm shadow-lg ${
+              toast.tone === "success"
+                ? "border-green-300 bg-green-50 text-green-800"
+                : "border-red-300 bg-red-50 text-red-800"
+            }`}
+          >
+            {toast.message}
+          </div>
         </div>
       ) : null}
 
@@ -395,7 +582,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
                 value={membershipCap}
               />
               <span className="mt-1 block text-xs text-gray-500">
-                Capacity controls the number of ACTIVE enrollments allowed for the year.
+                Capacity controls ACTIVE enrollments allowed for the year.
               </span>
             </label>
           </div>
@@ -406,13 +593,23 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
             <label className="flex items-center gap-2 text-sm">
               <input
                 checked={applicationEnabled}
-                onChange={(event) => setApplicationEnabled(event.target.checked)}
+                onChange={(event) => {
+                  if (applicationEnabled && !event.target.checked) {
+                    const confirmed = window.confirm(
+                      "Close Applications Open (Public /apply)?"
+                    );
+                    if (!confirmed) {
+                      return;
+                    }
+                  }
+                  setApplicationEnabled(event.target.checked);
+                }}
                 type="checkbox"
               />
               Applications Open (Public /apply)
             </label>
             <p className="text-xs text-gray-500">
-              Applicants can only access /apply while this toggle is enabled and any optional window dates allow it.
+              Public applicants can only access /apply while enabled and inside optional date windows.
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-sm">
@@ -510,12 +707,12 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
               <table className="min-w-full text-left text-sm">
                 <thead className="border-b bg-gray-50 text-xs uppercase text-gray-600">
                   <tr>
-                    <th className="px-3 py-2">Code</th>
+                    <th className="w-52 px-3 py-2">Code</th>
                     <th className="px-3 py-2">Name</th>
-                    <th className="px-3 py-2">Amount</th>
-                    <th className="px-3 py-2">Priority</th>
-                    <th className="px-3 py-2">Active</th>
-                    <th className="px-3 py-2">Actions</th>
+                    <th className="w-40 px-3 py-2">Amount (USD)</th>
+                    <th className="w-24 px-3 py-2">Priority</th>
+                    <th className="w-24 px-3 py-2">Active</th>
+                    <th className="w-28 px-3 py-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -528,9 +725,10 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
                   ) : (
                     pricingTiers.map((tier) => (
                       <TierRow
+                        draft={tierDrafts[tier.id] ?? tierToDraft(tier)}
                         key={tier.id}
-                        onDisable={() => void disableTier(tier)}
-                        onSave={(draft) => void saveTier(tier.id, draft)}
+                        onChange={(patch) => updateTierDraft(tier.id, patch)}
+                        onDisable={() => disableTierWithConfirm(tier.id)}
                         tier={tier}
                       />
                     ))
@@ -559,7 +757,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
                   onChange={(event) =>
                     setNewTier((state) => ({ ...state, amountDollars: event.target.value }))
                   }
-                  placeholder="Amount USD"
+                  placeholder="Amount"
                   step="0.01"
                   type="number"
                   value={newTier.amountDollars}
@@ -594,16 +792,23 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
         ) : null}
       </section>
 
-      <div>
-        <button
-          className="rounded bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-          disabled={isSaving}
-          onClick={() => void saveYearSettings()}
-          type="button"
-        >
-          {isSaving ? "Saving..." : "Save Settings"}
-        </button>
-      </div>
+      {(hasUnsavedChanges || isSaving) && (
+        <div className="fixed inset-x-0 bottom-4 z-40 px-4">
+          <div className="mx-auto flex w-full max-w-[1200px] items-center justify-between gap-3 rounded-xl border bg-white px-4 py-3 shadow-lg">
+            <p className="text-sm text-gray-700">
+              {hasUnsavedChanges ? `Unsaved changes: ${dirtySummary}` : "Saving changes..."}
+            </p>
+            <button
+              className="rounded bg-gray-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              disabled={!hasUnsavedChanges || isSaving}
+              onClick={() => void saveAllChanges()}
+              type="button"
+            >
+              {isSaving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -619,41 +824,35 @@ function MetricCard({ label, value }: { label: string; value: number }) {
 
 function TierRow({
   tier,
-  onSave,
+  draft,
+  onChange,
   onDisable,
 }: {
   tier: PricingTier;
-  onSave: (draft: TierDraft) => void;
+  draft: TierDraft;
+  onChange: (patch: Partial<TierDraft>) => void;
   onDisable: () => void;
 }) {
-  const [draft, setDraft] = useState<TierDraft>({
-    code: tier.code,
-    name: tier.name,
-    amountDollars: centsToDollars(tier.amountCents),
-    isActive: tier.isActive,
-    priority: String(tier.priority),
-  });
-
   return (
     <tr className="border-b">
       <td className="px-3 py-2">
         <input
-          className="w-32 rounded border p-1 text-sm"
-          onChange={(event) => setDraft((state) => ({ ...state, code: event.target.value }))}
+          className="w-full rounded border p-1 text-sm font-mono"
+          onChange={(event) => onChange({ code: event.target.value })}
           value={draft.code}
         />
       </td>
       <td className="px-3 py-2">
         <input
-          className="w-48 rounded border p-1 text-sm"
-          onChange={(event) => setDraft((state) => ({ ...state, name: event.target.value }))}
+          className="w-full rounded border p-1 text-sm"
+          onChange={(event) => onChange({ name: event.target.value })}
           value={draft.name}
         />
       </td>
       <td className="px-3 py-2">
         <input
-          className="w-28 rounded border p-1 text-sm"
-          onChange={(event) => setDraft((state) => ({ ...state, amountDollars: event.target.value }))}
+          className="w-full rounded border p-1 text-sm"
+          onChange={(event) => onChange({ amountDollars: event.target.value })}
           step="0.01"
           type="number"
           value={draft.amountDollars}
@@ -661,8 +860,8 @@ function TierRow({
       </td>
       <td className="px-3 py-2">
         <input
-          className="w-20 rounded border p-1 text-sm"
-          onChange={(event) => setDraft((state) => ({ ...state, priority: event.target.value }))}
+          className="w-full rounded border p-1 text-sm"
+          onChange={(event) => onChange({ priority: event.target.value })}
           type="number"
           value={draft.priority}
         />
@@ -671,31 +870,24 @@ function TierRow({
         <label className="flex items-center gap-2 text-xs">
           <input
             checked={draft.isActive}
-            onChange={(event) => setDraft((state) => ({ ...state, isActive: event.target.checked }))}
+            onChange={(event) => onChange({ isActive: event.target.checked })}
             type="checkbox"
           />
           {draft.isActive ? "Yes" : "No"}
         </label>
       </td>
       <td className="px-3 py-2">
-        <div className="flex gap-2">
+        {tier.isActive ? (
           <button
-            className="rounded border px-2 py-1 text-xs font-medium"
-            onClick={() => onSave(draft)}
+            className="rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-700"
+            onClick={onDisable}
             type="button"
           >
-            Save
+            Disable
           </button>
-          {tier.isActive ? (
-            <button
-              className="rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-700"
-              onClick={onDisable}
-              type="button"
-            >
-              Disable
-            </button>
-          ) : null}
-        </div>
+        ) : (
+          <span className="text-xs text-gray-500">Inactive</span>
+        )}
       </td>
     </tr>
   );

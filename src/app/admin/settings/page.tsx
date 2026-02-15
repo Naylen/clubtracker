@@ -1,20 +1,23 @@
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { requireAdmin } from "@/lib/auth";
-import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { MembershipSettingsClient } from "./membership-settings-client";
 
-export default async function AdminSettingsPage() {
+export default async function AdminSettingsPage({
+  searchParams,
+}: {
+  searchParams?: { tab?: string };
+}) {
   await requireAdmin("/admin/settings");
   const currentYear = getCurrentYearInNewYork();
+  const initialTab = searchParams?.tab;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        subtitle="Configure membership-year operations: applications, renewal windows, tiers, and signup day."
-        title="Settings"
-      />
-
-      <MembershipSettingsClient initialYear={currentYear} />
-    </div>
+    <PageShell
+      subtitle="Configure membership-year operations: applications, renewal windows, tiers, and signup day."
+      title="Settings"
+    >
+      <MembershipSettingsClient initialTab={initialTab} initialYear={currentYear} />
+    </PageShell>
   );
 }
