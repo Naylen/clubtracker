@@ -37,15 +37,20 @@ describe("Stripe webhook fulfillment", () => {
     const membershipEnrollment = {
       update: vi.fn().mockResolvedValue(undefined),
     };
+    const member = {
+      update: vi.fn().mockResolvedValue(undefined),
+    };
 
     const tx = {
       payment,
       membershipEnrollment,
+      member,
     };
 
     const db = {
       payment,
       membershipEnrollment,
+      member,
       $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<void>) => {
         await callback(tx);
       }),
@@ -81,6 +86,10 @@ describe("Stripe webhook fulfillment", () => {
     expect(membershipEnrollment.update).toHaveBeenCalledWith({
       where: { id: "enrollment_1" },
       data: expect.objectContaining({ status: "ACTIVE" }),
+    });
+    expect(member.update).toHaveBeenCalledWith({
+      where: { id: "member_1" },
+      data: { isActive: true },
     });
   });
 });
