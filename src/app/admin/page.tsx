@@ -24,7 +24,7 @@ export default async function AdminDashboardPage() {
   });
 
   const [activeMembers, activeEnrollments] = await Promise.all([
-    prisma.member.count({ where: { isActive: true, role: "MEMBER" } }),
+    prisma.member.count({ where: { isActive: true, role: "MEMBER", status: "ACTIVE" } }),
     membershipYear
       ? prisma.membershipEnrollment.count({
           where: {

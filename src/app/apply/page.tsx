@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import {
   createSessionToken,
   getCurrentUser,
@@ -9,7 +8,12 @@ import {
   setSessionCookie,
 } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { hashPassword } from "@/lib/password";
+import {
+  ApplicationFlowError,
+  createApplicantAccountAndSubmit,
+  getCurrentOpenApplicationYear,
+  submitApplicationForExistingAccount,
+} from "@/services/application-flow";
 
 type SearchParams = {
   success?: string;
@@ -42,21 +46,15 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
   };
 }
 
-function combineName(firstName: string, lastName: string): string {
-  return [firstName.trim(), lastName.trim()].filter(Boolean).join(" ").trim();
-}
-
 async function getOpenApplicationYear() {
-  const currentYear = getCurrentYearInNewYork();
-  const membershipYear = await prisma.membershipYear.findUnique({
-    where: { year: currentYear },
-  });
-
-  if (!membershipYear || !membershipYear.applicationEnabled) {
-    notFound();
+  try {
+    return await getCurrentOpenApplicationYear();
+  } catch (error) {
+    if (error instanceof ApplicationFlowError && error.code === "APPLICATIONS_CLOSED") {
+      notFound();
+    }
+    throw error;
   }
-
-  return membershipYear;
 }
 
 export default async function ApplyPage({ searchParams }: { searchParams: SearchParams }) {
@@ -119,84 +117,38 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
       redirect("/apply?error=Email%2C%20password%2C%20name%2C%20and%20DOB%20are%20required.");
     }
 
-    const existingMember = await prisma.member.findUnique({
-      where: { email },
-    });
-
-    if (existingMember) {
-      const existingActiveMembership = await prisma.membershipEnrollment.count({
-        where: {
-          memberId: existingMember.id,
-          status: "ACTIVE",
-        },
-      });
-
-      if (existingActiveMembership > 0) {
-        redirect(
-          "/login?next=%2Fportal&error=This%20email%20already%20belongs%20to%20an%20active%20member."
-        );
-      }
-
-      redirect("/login?next=%2Fapply&error=Account%20already%20exists.%20Please%20sign%20in.");
-    }
-
-    const createdMember = await prisma.member.create({
-      data: {
-        name: combineName(firstName, lastName),
+    try {
+      const { member: createdMember } = await createApplicantAccountAndSubmit({
+        membershipYearId: openYear.id,
         email,
-        passwordHash: hashPassword(password),
+        password,
+        firstName,
+        lastName,
         phone,
         address,
         dob,
-        role: "MEMBER",
-        isActive: true,
-      },
-    });
-
-    await prisma.membershipApplication.upsert({
-      where: {
-        membershipYearId_applicantEmail: {
-          membershipYearId: openYear.id,
-          applicantEmail: email,
-        },
-      },
-      update: {
-        applicantFirstName: firstName,
-        applicantLastName: lastName,
-        applicantPhone: phone,
-        applicantAddress: address,
-        applicantDob: dob,
         requestedDisabledVeteranDiscount,
-        disabledVeteranApproved: null,
-        assignedPricingTierId: null,
-        status: "SUBMITTED",
-        submittedAt: new Date(),
-        reviewedAt: null,
-        reviewedByMemberId: null,
-        denialReason: null,
-        createdMemberId: createdMember.id,
-      },
-      create: {
-        membershipYearId: openYear.id,
-        applicantEmail: email,
-        applicantFirstName: firstName,
-        applicantLastName: lastName,
-        applicantPhone: phone,
-        applicantAddress: address,
-        applicantDob: dob,
-        requestedDisabledVeteranDiscount,
-        status: "SUBMITTED",
-        submittedAt: new Date(),
-        createdMemberId: createdMember.id,
-      },
-    });
+      });
 
-    const token = createSessionToken({
-      memberId: createdMember.id,
-      email: createdMember.email,
-      role: createdMember.role,
-    });
-    setSessionCookie(token);
+      const token = createSessionToken({
+        memberId: createdMember.id,
+        email: createdMember.email,
+        role: createdMember.role,
+      });
+      setSessionCookie(token);
+    } catch (error) {
+      if (error instanceof ApplicationFlowError) {
+        if (error.code === "ACTIVE_MEMBER_EXISTS") {
+          redirect(
+            "/login?next=%2Fportal&error=This%20email%20already%20belongs%20to%20an%20active%20member."
+          );
+        }
+        if (error.code === "ACCOUNT_EXISTS") {
+          redirect("/login?next=%2Fapply&error=Account%20already%20exists.%20Please%20sign%20in.");
+        }
+      }
+      throw error;
+    }
 
     revalidatePath("/apply");
     revalidatePath("/portal");
@@ -213,23 +165,6 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
     }
 
     const openYear = await getOpenApplicationYear();
-    const account = await prisma.member.findUnique({
-      where: { id: authUser.memberId },
-    });
-    if (!account) {
-      redirect("/login?next=%2Fapply&error=Account%20not%20found.");
-    }
-
-    const existingActiveMembership = await prisma.membershipEnrollment.count({
-      where: {
-        memberId: account.id,
-        status: "ACTIVE",
-      },
-    });
-    if (existingActiveMembership > 0) {
-      redirect("/portal");
-    }
-
     const firstName = String(formData.get("firstName") ?? "").trim();
     const lastName = String(formData.get("lastName") ?? "").trim();
     const phone = String(formData.get("phone") ?? "").trim() || null;
@@ -242,53 +177,29 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
       redirect("/apply?error=Name%20and%20DOB%20are%20required.");
     }
 
-    await prisma.member.update({
-      where: { id: account.id },
-      data: {
-        name: combineName(firstName, lastName),
+    try {
+      await submitApplicationForExistingAccount({
+        membershipYearId: openYear.id,
+        memberId: authUser.memberId,
+        email: authUser.email,
+        firstName,
+        lastName,
         phone,
         address,
         dob,
-      },
-    });
-
-    await prisma.membershipApplication.upsert({
-      where: {
-        membershipYearId_applicantEmail: {
-          membershipYearId: openYear.id,
-          applicantEmail: account.email,
-        },
-      },
-      update: {
-        applicantFirstName: firstName,
-        applicantLastName: lastName,
-        applicantPhone: phone,
-        applicantAddress: address,
-        applicantDob: dob,
         requestedDisabledVeteranDiscount,
-        disabledVeteranApproved: null,
-        assignedPricingTierId: null,
-        status: "SUBMITTED",
-        submittedAt: new Date(),
-        reviewedAt: null,
-        reviewedByMemberId: null,
-        denialReason: null,
-        createdMemberId: account.id,
-      },
-      create: {
-        membershipYearId: openYear.id,
-        applicantEmail: account.email,
-        applicantFirstName: firstName,
-        applicantLastName: lastName,
-        applicantPhone: phone,
-        applicantAddress: address,
-        applicantDob: dob,
-        requestedDisabledVeteranDiscount,
-        status: "SUBMITTED",
-        submittedAt: new Date(),
-        createdMemberId: account.id,
-      },
-    });
+      });
+    } catch (error) {
+      if (error instanceof ApplicationFlowError) {
+        if (error.code === "ACTIVE_MEMBER_EXISTS") {
+          redirect("/portal");
+        }
+        if (error.code === "ACCOUNT_NOT_FOUND") {
+          redirect("/login?next=%2Fapply&error=Account%20not%20found.");
+        }
+      }
+      throw error;
+    }
 
     revalidatePath("/apply");
     revalidatePath("/portal");

@@ -437,7 +437,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
                 onChange={(event) => setApplicationEnabled(event.target.checked)}
                 type="checkbox"
               />
-              Applications open
+              Applications Open (public /apply)
             </label>
 
             <label className="text-sm">

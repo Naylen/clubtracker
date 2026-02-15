@@ -12,6 +12,12 @@ enum Role {
   MEMBER
 }
 
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
 enum EnrollmentStatus {
   ACTIVE
   PENDING_RENEWAL
@@ -58,6 +64,7 @@ model Member {
   isDisabledVeteran Boolean                @default(false)
   isSenior          Boolean                @default(false)
   isActive          Boolean                @default(true)
+  status            MemberStatus           @default(ACTIVE)
   emergencyContactName String?
   emergencyContactPhone String?
   emergencyContactRelationship String?

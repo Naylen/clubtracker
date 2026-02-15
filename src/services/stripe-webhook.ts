@@ -87,7 +87,10 @@ async function handleCheckoutSessionCompleted(
 
     await tx.member.update({
       where: { id: payment.memberId },
-      data: { isActive: true },
+      data: {
+        isActive: true,
+        status: "ACTIVE",
+      },
     });
   });
 }
