@@ -1,9 +1,15 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
-import { requireCurrentUser } from "@/lib/auth";
+import {
+  createSessionToken,
+  getCurrentUser,
+  requireCurrentUser,
+  setSessionCookie,
+} from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { hashPassword } from "@/lib/password";
 
 type SearchParams = {
   success?: string;
@@ -15,7 +21,6 @@ function parseDateInput(value: string): Date | null {
   if (!trimmed) {
     return null;
   }
-
   const parsed = new Date(`${trimmed}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) {
     return null;
@@ -23,34 +28,71 @@ function parseDateInput(value: string): Date | null {
   return parsed;
 }
 
-export default async function ApplyPage({ searchParams }: { searchParams: SearchParams }) {
-  const user = await requireCurrentUser("/apply");
-  const currentYear = getCurrentYearInNewYork();
+function splitName(fullName: string): { firstName: string; lastName: string } {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return { firstName: "", lastName: "" };
+  }
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: "" };
+  }
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  };
+}
 
-  if (user.role !== "MEMBER") {
-    return (
-      <main className="mx-auto max-w-3xl p-6">
-        <section className="rounded-xl border bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-bold">Membership Application</h1>
-          <p className="mt-2 text-sm text-gray-700">
-            Only member accounts can submit applications.
-          </p>
-        </section>
-      </main>
-    );
+function combineName(firstName: string, lastName: string): string {
+  return [firstName.trim(), lastName.trim()].filter(Boolean).join(" ").trim();
+}
+
+async function getOpenApplicationYear() {
+  const currentYear = getCurrentYearInNewYork();
+  const membershipYear = await prisma.membershipYear.findUnique({
+    where: { year: currentYear },
+  });
+
+  if (!membershipYear || !membershipYear.applicationEnabled) {
+    notFound();
   }
 
-  const [member, membershipYear] = await Promise.all([
-    prisma.member.findUnique({ where: { id: user.memberId } }),
-    prisma.membershipYear.findUnique({ where: { year: currentYear } }),
-  ]);
+  return membershipYear;
+}
 
-  const application = membershipYear
+export default async function ApplyPage({ searchParams }: { searchParams: SearchParams }) {
+  const membershipYear = await getOpenApplicationYear();
+  const currentUser = await getCurrentUser();
+
+  if (currentUser?.role === "ADMIN") {
+    redirect("/admin");
+  }
+
+  const member = currentUser
+    ? await prisma.member.findUnique({
+        where: { id: currentUser.memberId },
+      })
+    : null;
+
+  const activeEnrollmentCount =
+    member?.id
+      ? await prisma.membershipEnrollment.count({
+          where: {
+            memberId: member.id,
+            status: "ACTIVE",
+          },
+        })
+      : 0;
+
+  if (member && activeEnrollmentCount > 0) {
+    redirect("/portal");
+  }
+
+  const application = member
     ? await prisma.membershipApplication.findUnique({
         where: {
-          memberId_membershipYearId: {
-            memberId: user.memberId,
+          membershipYearId_applicantEmail: {
             membershipYearId: membershipYear.id,
+            applicantEmail: member.email,
           },
         },
         include: {
@@ -59,7 +101,110 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
       })
     : null;
 
-  async function submitApplicationAction(formData: FormData) {
+  async function createAccountAndSubmitAction(formData: FormData) {
+    "use server";
+
+    const openYear = await getOpenApplicationYear();
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const password = String(formData.get("password") ?? "");
+    const firstName = String(formData.get("firstName") ?? "").trim();
+    const lastName = String(formData.get("lastName") ?? "").trim();
+    const phone = String(formData.get("phone") ?? "").trim() || null;
+    const address = String(formData.get("address") ?? "").trim() || null;
+    const dob = parseDateInput(String(formData.get("dob") ?? ""));
+    const requestedDisabledVeteranDiscount =
+      formData.get("requestedDisabledVeteranDiscount") === "on";
+
+    if (!email || !password || !firstName || !lastName || !dob) {
+      redirect("/apply?error=Email%2C%20password%2C%20name%2C%20and%20DOB%20are%20required.");
+    }
+
+    const existingMember = await prisma.member.findUnique({
+      where: { email },
+    });
+
+    if (existingMember) {
+      const existingActiveMembership = await prisma.membershipEnrollment.count({
+        where: {
+          memberId: existingMember.id,
+          status: "ACTIVE",
+        },
+      });
+
+      if (existingActiveMembership > 0) {
+        redirect(
+          "/login?next=%2Fportal&error=This%20email%20already%20belongs%20to%20an%20active%20member."
+        );
+      }
+
+      redirect("/login?next=%2Fapply&error=Account%20already%20exists.%20Please%20sign%20in.");
+    }
+
+    const createdMember = await prisma.member.create({
+      data: {
+        name: combineName(firstName, lastName),
+        email,
+        passwordHash: hashPassword(password),
+        phone,
+        address,
+        dob,
+        role: "MEMBER",
+        isActive: true,
+      },
+    });
+
+    await prisma.membershipApplication.upsert({
+      where: {
+        membershipYearId_applicantEmail: {
+          membershipYearId: openYear.id,
+          applicantEmail: email,
+        },
+      },
+      update: {
+        applicantFirstName: firstName,
+        applicantLastName: lastName,
+        applicantPhone: phone,
+        applicantAddress: address,
+        applicantDob: dob,
+        requestedDisabledVeteranDiscount,
+        disabledVeteranApproved: null,
+        assignedPricingTierId: null,
+        status: "SUBMITTED",
+        submittedAt: new Date(),
+        reviewedAt: null,
+        reviewedByMemberId: null,
+        denialReason: null,
+        createdMemberId: createdMember.id,
+      },
+      create: {
+        membershipYearId: openYear.id,
+        applicantEmail: email,
+        applicantFirstName: firstName,
+        applicantLastName: lastName,
+        applicantPhone: phone,
+        applicantAddress: address,
+        applicantDob: dob,
+        requestedDisabledVeteranDiscount,
+        status: "SUBMITTED",
+        submittedAt: new Date(),
+        createdMemberId: createdMember.id,
+      },
+    });
+
+    const token = createSessionToken({
+      memberId: createdMember.id,
+      email: createdMember.email,
+      role: createdMember.role,
+    });
+    setSessionCookie(token);
+
+    revalidatePath("/apply");
+    revalidatePath("/portal");
+    revalidatePath("/admin/applications");
+    redirect("/apply?success=Application%20submitted%20for%20review.");
+  }
+
+  async function updateApplicationAction(formData: FormData) {
     "use server";
 
     const authUser = await requireCurrentUser("/apply");
@@ -67,35 +212,40 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
       redirect("/forbidden");
     }
 
-    const year = getCurrentYearInNewYork();
-    const currentYearRecord = await prisma.membershipYear.findUnique({
-      where: { year },
+    const openYear = await getOpenApplicationYear();
+    const account = await prisma.member.findUnique({
+      where: { id: authUser.memberId },
     });
-
-    if (!currentYearRecord || !currentYearRecord.applicationEnabled) {
-      redirect("/apply?error=Applications%20are%20currently%20closed.");
+    if (!account) {
+      redirect("/login?next=%2Fapply&error=Account%20not%20found.");
     }
 
-    const name = String(formData.get("name") ?? "").trim();
+    const existingActiveMembership = await prisma.membershipEnrollment.count({
+      where: {
+        memberId: account.id,
+        status: "ACTIVE",
+      },
+    });
+    if (existingActiveMembership > 0) {
+      redirect("/portal");
+    }
+
+    const firstName = String(formData.get("firstName") ?? "").trim();
+    const lastName = String(formData.get("lastName") ?? "").trim();
     const phone = String(formData.get("phone") ?? "").trim() || null;
     const address = String(formData.get("address") ?? "").trim() || null;
-    const dobInput = String(formData.get("dob") ?? "");
-    const dob = parseDateInput(dobInput);
+    const dob = parseDateInput(String(formData.get("dob") ?? ""));
     const requestedDisabledVeteranDiscount =
       formData.get("requestedDisabledVeteranDiscount") === "on";
 
-    if (!name) {
-      redirect("/apply?error=Full%20name%20is%20required.");
-    }
-
-    if (!dob) {
-      redirect("/apply?error=Valid%20date%20of%20birth%20is%20required.");
+    if (!firstName || !lastName || !dob) {
+      redirect("/apply?error=Name%20and%20DOB%20are%20required.");
     }
 
     await prisma.member.update({
-      where: { id: authUser.memberId },
+      where: { id: account.id },
       data: {
-        name,
+        name: combineName(firstName, lastName),
         phone,
         address,
         dob,
@@ -104,29 +254,39 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
 
     await prisma.membershipApplication.upsert({
       where: {
-        memberId_membershipYearId: {
-          memberId: authUser.memberId,
-          membershipYearId: currentYearRecord.id,
+        membershipYearId_applicantEmail: {
+          membershipYearId: openYear.id,
+          applicantEmail: account.email,
         },
       },
       update: {
-        status: "SUBMITTED",
+        applicantFirstName: firstName,
+        applicantLastName: lastName,
+        applicantPhone: phone,
+        applicantAddress: address,
+        applicantDob: dob,
         requestedDisabledVeteranDiscount,
         disabledVeteranApproved: null,
         assignedPricingTierId: null,
+        status: "SUBMITTED",
         submittedAt: new Date(),
         reviewedAt: null,
         reviewedByMemberId: null,
         denialReason: null,
+        createdMemberId: account.id,
       },
       create: {
-        memberId: authUser.memberId,
-        membershipYearId: currentYearRecord.id,
-        status: "SUBMITTED",
+        membershipYearId: openYear.id,
+        applicantEmail: account.email,
+        applicantFirstName: firstName,
+        applicantLastName: lastName,
+        applicantPhone: phone,
+        applicantAddress: address,
+        applicantDob: dob,
         requestedDisabledVeteranDiscount,
-        disabledVeteranApproved: null,
-        seniorAutoApplied: false,
+        status: "SUBMITTED",
         submittedAt: new Date(),
+        createdMemberId: account.id,
       },
     });
 
@@ -136,13 +296,17 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
     redirect("/apply?success=Application%20submitted%20for%20review.");
   }
 
+  const name = splitName(member?.name ?? "");
+
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Membership Application</h1>
-        <Link className="text-sm font-medium underline" href="/portal">
-          Back to portal
-        </Link>
+        <h1 className="text-3xl font-bold">New Member Application</h1>
+        {member ? (
+          <Link className="text-sm font-medium underline" href="/portal">
+            Back to portal
+          </Link>
+        ) : null}
       </div>
 
       {searchParams.success ? (
@@ -156,98 +320,129 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
         </p>
       ) : null}
 
-      {!membershipYear || !membershipYear.applicationEnabled ? (
+      {application ? (
         <section className="rounded-xl border bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold">Applications are currently closed.</h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Applications for {currentYear} are locked until an administrator opens them.
+          <h2 className="text-xl font-semibold">Application Status</h2>
+          <p className="mt-2 text-sm">
+            Current status: <span className="font-medium">{application.status}</span>
           </p>
-          {application ? (
-            <p className="mt-3 text-sm">
-              Existing application status: <span className="font-medium">{application.status}</span>
+          {application.status === "APPROVED" && application.assignedPricingTier ? (
+            <p className="mt-2 text-sm text-gray-700">
+              Assigned tier: {application.assignedPricingTier.name}. Payment is available in your
+              member portal.
             </p>
           ) : null}
+          {application.status === "DENIED" && application.denialReason ? (
+            <p className="mt-2 text-sm text-red-700">Denial reason: {application.denialReason}</p>
+          ) : null}
         </section>
-      ) : application?.status === "APPROVED" ? (
-        <section className="rounded-xl border bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold">Application Approved</h2>
-          <p className="mt-2 text-sm text-gray-700">
-            Your application for {currentYear} is approved.
-            {application.assignedPricingTier
-              ? ` Assigned tier: ${application.assignedPricingTier.name}.`
-              : ""}
-          </p>
-          <p className="mt-2 text-sm text-gray-600">
-            Return to the member portal to continue with payment.
-          </p>
-        </section>
-      ) : (
-        <section className="rounded-xl border bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold">Submit Application ({currentYear})</h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Applications are reviewed by admin before payment is unlocked.
-          </p>
+      ) : null}
 
-          <form action={submitApplicationAction} className="mt-5 grid gap-3 sm:grid-cols-2">
-            <label className="text-sm font-medium sm:col-span-2">
-              Full Name
-              <input
-                className="mt-1 w-full rounded border p-2"
-                defaultValue={member?.name ?? ""}
-                name="name"
-                required
-              />
-            </label>
+      <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-semibold">
+          {member ? "Submit or Update Application" : "Create Account and Apply"}
+        </h2>
+        <p className="mt-2 text-sm text-gray-600">
+          Applicants cannot choose pricing tiers. Admin assigns tier after review.
+        </p>
 
-            <label className="text-sm font-medium">
-              Phone
-              <input
-                className="mt-1 w-full rounded border p-2"
-                defaultValue={member?.phone ?? ""}
-                name="phone"
-              />
-            </label>
+        <form
+          action={member ? updateApplicationAction : createAccountAndSubmitAction}
+          className="mt-5 grid gap-3 sm:grid-cols-2"
+        >
+          {!member ? (
+            <>
+              <label className="text-sm font-medium sm:col-span-2">
+                Email
+                <input className="mt-1 w-full rounded border p-2" name="email" required type="email" />
+              </label>
+              <label className="text-sm font-medium sm:col-span-2">
+                Password
+                <input
+                  className="mt-1 w-full rounded border p-2"
+                  minLength={8}
+                  name="password"
+                  required
+                  type="password"
+                />
+              </label>
+            </>
+          ) : null}
 
-            <label className="text-sm font-medium">
-              Date of Birth
-              <input
-                className="mt-1 w-full rounded border p-2"
-                defaultValue={member?.dob ? member.dob.toISOString().slice(0, 10) : ""}
-                name="dob"
-                required
-                type="date"
-              />
-            </label>
+          <label className="text-sm font-medium">
+            First Name
+            <input
+              className="mt-1 w-full rounded border p-2"
+              defaultValue={application?.applicantFirstName ?? name.firstName}
+              name="firstName"
+              required
+            />
+          </label>
 
-            <label className="text-sm font-medium sm:col-span-2">
-              Address
-              <input
-                className="mt-1 w-full rounded border p-2"
-                defaultValue={member?.address ?? ""}
-                name="address"
-              />
-            </label>
+          <label className="text-sm font-medium">
+            Last Name
+            <input
+              className="mt-1 w-full rounded border p-2"
+              defaultValue={application?.applicantLastName ?? name.lastName}
+              name="lastName"
+              required
+            />
+          </label>
 
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <input
-                defaultChecked={application?.requestedDisabledVeteranDiscount ?? false}
-                name="requestedDisabledVeteranDiscount"
-                type="checkbox"
-              />
-              Request disabled veteran discount (admin approval required)
-            </label>
+          <label className="text-sm font-medium">
+            Phone
+            <input
+              className="mt-1 w-full rounded border p-2"
+              defaultValue={application?.applicantPhone ?? member?.phone ?? ""}
+              name="phone"
+            />
+          </label>
 
-            <div className="sm:col-span-2">
-              <button
-                className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white"
-                type="submit"
-              >
-                Submit Application
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
+          <label className="text-sm font-medium">
+            Date of Birth
+            <input
+              className="mt-1 w-full rounded border p-2"
+              defaultValue={
+                application?.applicantDob
+                  ? application.applicantDob.toISOString().slice(0, 10)
+                  : member?.dob
+                    ? member.dob.toISOString().slice(0, 10)
+                    : ""
+              }
+              name="dob"
+              required
+              type="date"
+            />
+          </label>
+
+          <label className="text-sm font-medium sm:col-span-2">
+            Address
+            <input
+              className="mt-1 w-full rounded border p-2"
+              defaultValue={application?.applicantAddress ?? member?.address ?? ""}
+              name="address"
+            />
+          </label>
+
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input
+              defaultChecked={application?.requestedDisabledVeteranDiscount ?? false}
+              name="requestedDisabledVeteranDiscount"
+              type="checkbox"
+            />
+            Request disabled veteran discount (admin approval required)
+          </label>
+
+          <div className="sm:col-span-2">
+            <button
+              className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white"
+              type="submit"
+            >
+              Submit Application
+            </button>
+          </div>
+        </form>
+      </section>
     </main>
   );
 }

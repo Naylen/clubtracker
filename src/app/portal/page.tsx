@@ -3,6 +3,7 @@ import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { requireCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import {
+  determineRenewalTierForMember,
   getLateRenewalPolicy,
   isRenewalBlockedByLatePolicy,
 } from "@/services/membership";
@@ -19,10 +20,16 @@ export default async function MemberPortalPage() {
   const user = await requireCurrentUser("/portal");
   const currentYear = getCurrentYearInNewYork();
 
-  const [member, membershipYear] = await Promise.all([
+  const [member, membershipYear, hasAnyActiveEnrollment] = await Promise.all([
     prisma.member.findUnique({ where: { id: user.memberId } }),
     prisma.membershipYear.findUnique({
       where: { year: currentYear },
+    }),
+    prisma.membershipEnrollment.count({
+      where: {
+        memberId: user.memberId,
+        status: "ACTIVE",
+      },
     }),
   ]);
 
@@ -39,9 +46,9 @@ export default async function MemberPortalPage() {
   const application = membershipYear
     ? await prisma.membershipApplication.findUnique({
         where: {
-          memberId_membershipYearId: {
-            memberId: user.memberId,
+          membershipYearId_applicantEmail: {
             membershipYearId: membershipYear.id,
+            applicantEmail: user.email,
           },
         },
         include: {
@@ -50,37 +57,42 @@ export default async function MemberPortalPage() {
       })
     : null;
 
-  const price = application?.assignedPricingTier ?? null;
+  const renewalTier =
+    member && membershipYear ? await determineRenewalTierForMember({ member, membershipYear }) : null;
+  const price = application?.assignedPricingTier ?? renewalTier;
   const lateRenewalPolicy = await getLateRenewalPolicy();
-  const renewalBlocked = membershipYear
+  const isExistingMember = hasAnyActiveEnrollment > 0;
+  const renewalBlocked = membershipYear && isExistingMember
     ? await isRenewalBlockedByLatePolicy({ membershipYear })
     : false;
 
   const alreadyRenewed = enrollment?.status === "ACTIVE";
   const applicationApproved = application?.status === "APPROVED" && Boolean(application.assignedPricingTier);
-  const canPay = Boolean(
-    member && membershipYear && applicationApproved && !alreadyRenewed && !renewalBlocked
-  );
+  const canPay =
+    Boolean(member && membershipYear && !alreadyRenewed && !renewalBlocked) &&
+    (isExistingMember || applicationApproved);
 
   let disabledReason = "";
   if (!membershipYear) {
     disabledReason = `Membership year ${currentYear} has not been opened yet.`;
-  } else if (!application) {
+  } else if (!isExistingMember && !application) {
     disabledReason = "Submit your application before payment is available.";
-  } else if (application.status === "SUBMITTED") {
+  } else if (application?.status === "SUBMITTED") {
     disabledReason = "Awaiting admin approval before payment is available.";
-  } else if (application.status === "DENIED") {
+  } else if (application?.status === "DENIED") {
     disabledReason = application.denialReason
       ? `Application denied: ${application.denialReason}`
       : "Application denied.";
-  } else if (application.status !== "APPROVED") {
+  } else if (!isExistingMember && application?.status !== "APPROVED") {
     disabledReason = "Application must be approved before payment is available.";
-  } else if (!application.assignedPricingTier) {
+  } else if (!isExistingMember && !application?.assignedPricingTier) {
     disabledReason = "Awaiting pricing tier assignment.";
   } else if (alreadyRenewed) {
     disabledReason = "Your renewal is already paid and active for this year.";
   } else if (renewalBlocked) {
     disabledReason = "Renewal is past due and late renewals are currently disabled.";
+  } else if (!price) {
+    disabledReason = "No active pricing tier is available for this year.";
   }
 
   return (
@@ -105,7 +117,7 @@ export default async function MemberPortalPage() {
             </p>
             <p>
               <span className="font-medium">Your status:</span>{" "}
-              {application ? application.status : "NOT_SUBMITTED"}
+              {isExistingMember && !application ? "CURRENT_MEMBER" : application ? application.status : "NOT_SUBMITTED"}
             </p>
             {application?.assignedPricingTier ? (
               <p>
@@ -119,7 +131,7 @@ export default async function MemberPortalPage() {
                 <span className="font-medium">Denial reason:</span> {application.denialReason}
               </p>
             ) : null}
-            {membershipYear.applicationEnabled && application?.status !== "APPROVED" ? (
+            {membershipYear.applicationEnabled && !isExistingMember && application?.status !== "APPROVED" ? (
               <Link className="inline-block rounded border px-3 py-1.5 text-sm" href="/apply">
                 {application ? "Update Application" : "Start Application"}
               </Link>
