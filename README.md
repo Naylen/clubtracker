@@ -36,7 +36,8 @@ Edit `.env` with your values:
 
 - `DATABASE_URL` — your Postgres connection string
 - `AUTH_SECRET` (or `NEXTAUTH_SECRET`) — generate with `openssl rand -base64 32`
-- `ADMIN_EMAIL` / `ADMIN_PASSWORD` — initial seeded admin login
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD` — admin bootstrap credentials
+- `ADMIN_BOOTSTRAP` — set `true` only when you need to create/reset admin credentials
 - `DL_ENCRYPTION_KEY` — 32-byte key for encrypted driver-license storage (base64 or 64-char hex)
 - `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` — from Stripe dashboard (use test keys)
 - `STRIPE_WEBHOOK_SECRET` — from Stripe CLI or dashboard
@@ -53,6 +54,7 @@ Edit `.env` with your values:
 npx prisma generate       # Generate Prisma client
 npm run db:migrate        # Create/apply migrations
 npm run db:seed           # Seed initial data (membership year + settings)
+npm run admin:bootstrap   # Optional: create/reset admin when ADMIN_BOOTSTRAP=true
 ```
 
 ### 4. Start dev server
@@ -89,6 +91,7 @@ docker compose up --build -d
 ```bash
 docker compose exec app npx prisma migrate deploy
 docker compose exec app npx prisma db seed
+docker compose exec app npm run admin:bootstrap
 ```
 
 Seed requires an up-to-date schema, so run migrations first.
@@ -119,6 +122,7 @@ docker compose --profile prod up --build -d db app-prod
 ```bash
 docker compose --profile prod exec app-prod npx prisma migrate deploy
 docker compose --profile prod exec app-prod npx prisma db seed
+docker compose --profile prod exec app-prod npm run admin:bootstrap
 ```
 
 ## Reset DB
@@ -159,6 +163,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 | `npm run db:migrate` | Create and run migrations |
 | `npm run db:migrate:deploy` | Apply existing migrations (deploy-safe) |
 | `npm run db:seed` | Seed database |
+| `npm run admin:bootstrap` | Create/reset admin user when `ADMIN_BOOTSTRAP=true` |
 | `npm run db:studio` | Open Prisma Studio (DB GUI) |
 | `npm run docker:dev` | Docker Compose dev up/build |
 | `npm run docker:prod` | Docker Compose prod target up/build |
@@ -170,10 +175,25 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 | Route | Description |
 |---|---|
 | `/` | Home page |
+| `/apply` | New-member application (public only when **Applications Open** is enabled for current year) |
 | `/admin` | Admin dashboard (auth required) |
 | `/admin/settings` | Membership year settings (admin only) |
 | `/admin/members/import` | Admin CSV member import (preview + confirm) |
 | `/api/health` | Health check endpoint (JSON) |
+
+### If You Cannot Log In As Admin
+
+Use admin bootstrap to recover access without wiping the database:
+
+1. Set these in `.env`:
+   - `ADMIN_EMAIL=your-admin-email`
+   - `ADMIN_PASSWORD=your-new-password`
+   - `ADMIN_BOOTSTRAP=true`
+2. Restart app container or run bootstrap manually:
+   - `docker compose exec app npm run admin:bootstrap`
+   - or `docker compose --profile prod exec app-prod npm run admin:bootstrap`
+3. Log in at `/login`.
+4. Set `ADMIN_BOOTSTRAP=false` again after recovery.
 
 ## Architecture
 

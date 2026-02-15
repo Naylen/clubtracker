@@ -89,7 +89,10 @@ describe("Stripe webhook fulfillment", () => {
     });
     expect(member.update).toHaveBeenCalledWith({
       where: { id: "member_1" },
-      data: { isActive: true },
+      data: {
+        isActive: true,
+        status: "ACTIVE",
+      },
     });
   });
 });
