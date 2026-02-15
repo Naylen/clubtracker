@@ -1,4 +1,4 @@
-import { Prisma, type Member, type MembershipYear } from "@prisma/client";
+import { Prisma, type Member, type MembershipYear, type PricingTier } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   buildMembershipYearDates,
@@ -17,18 +17,21 @@ const DEFAULT_PRICING_TIERS = [
     name: "Standard",
     amountCents: DEFAULT_STANDARD_RENEWAL_PRICE_CENTS,
     isSenior: false,
+    priority: 100,
   },
   {
     code: "SENIOR",
     name: "Senior (65+)",
     amountCents: DEFAULT_DISCOUNT_RENEWAL_PRICE_CENTS,
     isSenior: true,
+    priority: 90,
   },
   {
     code: "DISABLED_VETERAN",
     name: "Disabled Veteran",
     amountCents: DEFAULT_DISCOUNT_RENEWAL_PRICE_CENTS,
     isSenior: false,
+    priority: 95,
   },
 ] as const;
 
@@ -38,6 +41,7 @@ export type LateRenewalPolicy = {
 };
 
 export type RenewalDiscountReason = "DISABLED_VETERAN" | "AGE_65_PLUS" | null;
+export type ResolvedPricingTier = Pick<PricingTier, "id" | "code" | "name" | "amountCents">;
 
 export function getRenewalPriceForMember(
   member: Pick<Member, "isDisabledVeteran" | "isSenior" | "dob">,
@@ -64,6 +68,69 @@ export function getRenewalPriceForMember(
   return {
     amountCents: standardPrice,
     discountReason: null,
+  };
+}
+
+function getTierByCode(
+  tiers: Array<Pick<PricingTier, "id" | "code" | "name" | "amountCents">>,
+  code: string
+) {
+  return tiers.find((tier) => tier.code === code) ?? null;
+}
+
+export async function determineRenewalTierForMember(input: {
+  member: Pick<Member, "isDisabledVeteran" | "isSenior" | "dob">;
+  membershipYear: Pick<MembershipYear, "id" | "standardPriceCents" | "discountPriceCents">;
+}): Promise<ResolvedPricingTier | null> {
+  const activeTiers = await prisma.pricingTier.findMany({
+    where: {
+      membershipYearId: input.membershipYear.id,
+      isActive: true,
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      amountCents: true,
+    },
+    orderBy: [{ priority: "asc" }, { code: "asc" }],
+  });
+
+  if (input.member.isDisabledVeteran) {
+    const disabledVeteranTier = getTierByCode(activeTiers, "DISABLED_VETERAN");
+    if (disabledVeteranTier) {
+      return disabledVeteranTier;
+    }
+  }
+
+  const seniorEligible = input.member.isSenior || isSeniorFromDob(input.member.dob);
+  if (seniorEligible) {
+    const seniorTier = getTierByCode(activeTiers, "SENIOR");
+    if (seniorTier) {
+      return seniorTier;
+    }
+  }
+
+  const standardTier = getTierByCode(activeTiers, "STANDARD");
+  if (standardTier) {
+    return standardTier;
+  }
+
+  if (activeTiers.length > 0) {
+    return activeTiers[0];
+  }
+
+  const fallback = getRenewalPriceForMember(input.member, input.membershipYear);
+  return {
+    id: "fallback",
+    code: fallback.discountReason === "DISABLED_VETERAN" ? "DISABLED_VETERAN" : fallback.discountReason === "AGE_65_PLUS" ? "SENIOR" : "STANDARD",
+    name:
+      fallback.discountReason === "DISABLED_VETERAN"
+        ? "Disabled Veteran"
+        : fallback.discountReason === "AGE_65_PLUS"
+          ? "Senior (65+)"
+          : "Standard",
+    amountCents: fallback.amountCents,
   };
 }
 
@@ -175,6 +242,7 @@ export async function ensureDefaultPricingTiers(membershipYearId: string) {
         isActive: true,
         isSenior: tier.isSenior,
         requiresAdminApproval: true,
+        priority: tier.priority,
       },
       create: {
         membershipYearId,
@@ -184,6 +252,7 @@ export async function ensureDefaultPricingTiers(membershipYearId: string) {
         isActive: true,
         isSenior: tier.isSenior,
         requiresAdminApproval: true,
+        priority: tier.priority,
       },
     });
   }

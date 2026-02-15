@@ -84,6 +84,8 @@ async function main() {
         isActive: true,
         isSenior: tier.isSenior,
         requiresAdminApproval: true,
+        priority:
+          tier.code === "STANDARD" ? 100 : tier.code === "SENIOR" ? 90 : 95,
       },
       create: {
         membershipYearId: membershipYear.id,
@@ -93,6 +95,8 @@ async function main() {
         isActive: true,
         isSenior: tier.isSenior,
         requiresAdminApproval: true,
+        priority:
+          tier.code === "STANDARD" ? 100 : tier.code === "SENIOR" ? 90 : 95,
       },
     });
   }

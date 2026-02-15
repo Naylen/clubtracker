@@ -71,9 +71,9 @@ model Member {
   updatedAt         DateTime               @updatedAt
 
   householdMembers  HouseholdMember[]
-  enrollments       MembershipEnrollment[]
-  payments          Payment[]
-  applications      MembershipApplication[] @relation("ApplicantApplications")
+  enrollments          MembershipEnrollment[]
+  payments             Payment[]
+  createdApplications  MembershipApplication[] @relation("CreatedMemberApplications")
   reviewedApplications MembershipApplication[] @relation("ReviewedApplications")
   communicationLogs CommunicationLog[]
   authoredAuditLogs AuditLog[]             @relation("AuditActor")
@@ -126,6 +126,7 @@ model PricingTier {
   isActive             Boolean  @default(true)
   isSenior             Boolean  @default(false)
   requiresAdminApproval Boolean @default(true)
+  priority             Int      @default(100)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -138,13 +139,19 @@ model PricingTier {
 
 model MembershipApplication {
   id                             String            @id @default(uuid())
-  memberId                       String
   membershipYearId               String
+  applicantEmail                 String
+  applicantFirstName             String
+  applicantLastName              String
+  applicantPhone                 String?
+  applicantAddress               String?
+  applicantDob                   DateTime?
   status                         ApplicationStatus @default(DRAFT)
   requestedDisabledVeteranDiscount Boolean         @default(false)
   disabledVeteranApproved        Boolean?
   seniorAutoApplied              Boolean           @default(false)
   assignedPricingTierId          String?
+  createdMemberId                String?
   submittedAt                    DateTime?
   reviewedAt                     DateTime?
   reviewedByMemberId             String?
@@ -152,14 +159,15 @@ model MembershipApplication {
   createdAt                      DateTime          @default(now())
   updatedAt                      DateTime          @updatedAt
 
-  member            Member       @relation("ApplicantApplications", fields: [memberId], references: [id], onDelete: Cascade)
-  reviewedByMember  Member?      @relation("ReviewedApplications", fields: [reviewedByMemberId], references: [id], onDelete: SetNull)
-  membershipYear    MembershipYear @relation(fields: [membershipYearId], references: [id], onDelete: Cascade)
+  createdMember      Member?       @relation("CreatedMemberApplications", fields: [createdMemberId], references: [id], onDelete: SetNull)
+  reviewedByMember   Member?       @relation("ReviewedApplications", fields: [reviewedByMemberId], references: [id], onDelete: SetNull)
+  membershipYear     MembershipYear @relation(fields: [membershipYearId], references: [id], onDelete: Cascade)
   assignedPricingTier PricingTier? @relation(fields: [assignedPricingTierId], references: [id], onDelete: SetNull)
 
-  @@unique([memberId, membershipYearId])
+  @@unique([membershipYearId, applicantEmail])
   @@index([membershipYearId, status])
   @@index([reviewedByMemberId])
+  @@index([createdMemberId])
 }
 
 model MembershipEnrollment {

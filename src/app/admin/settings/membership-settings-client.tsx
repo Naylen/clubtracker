@@ -8,11 +8,18 @@ type MembershipYearSettings = {
   renewalOpensAt: string;
   renewalDueAt: string;
   membershipCap: number;
-  standardPriceCents: number;
-  discountPriceCents: number;
   signupEnabled: boolean;
   signupDate: string | null;
   applicationEnabled: boolean;
+};
+
+type PricingTier = {
+  id: string;
+  code: string;
+  name: string;
+  amountCents: number;
+  isActive: boolean;
+  priority: number;
 };
 
 type ToastState = {
@@ -20,15 +27,21 @@ type ToastState = {
   message: string;
 } | null;
 
-type ActiveTab = "renewal" | "pricing" | "capacity" | "signup";
+type ActiveTab = "renewal" | "capacity" | "signup" | "tiers";
 
 type FormErrors = {
   renewalOpensAt?: string;
   renewalDueAt?: string;
   membershipCap?: string;
-  standardPriceDollars?: string;
-  discountPriceDollars?: string;
   signupDate?: string;
+};
+
+type TierDraft = {
+  code: string;
+  name: string;
+  amountDollars: string;
+  isActive: boolean;
+  priority: string;
 };
 
 function toNyDateInput(isoDate: string): string {
@@ -54,25 +67,35 @@ function dollarsToCents(input: string): number {
   return Math.round(Number(input) * 100);
 }
 
+function normalizeTierCode(input: string): string {
+  return input.trim().toUpperCase().replace(/\s+/g, "_");
+}
+
 export function MembershipSettingsClient({ initialYear }: { initialYear: number }) {
   const [year, setYear] = useState(initialYear);
   const [loadedYear, setLoadedYear] = useState(initialYear);
   const [renewalOpensAt, setRenewalOpensAt] = useState("");
   const [renewalDueAt, setRenewalDueAt] = useState("");
   const [membershipCap, setMembershipCap] = useState("350");
-  const [standardPriceDollars, setStandardPriceDollars] = useState("150.00");
-  const [discountPriceDollars, setDiscountPriceDollars] = useState("100.00");
   const [signupEnabled, setSignupEnabled] = useState(true);
   const [signupDate, setSignupDate] = useState("");
   const [applicationEnabled, setApplicationEnabled] = useState(false);
+  const [pricingTiers, setPricingTiers] = useState<PricingTier[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>("renewal");
   const [errors, setErrors] = useState<FormErrors>({});
   const [toast, setToast] = useState<ToastState>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [newTier, setNewTier] = useState<TierDraft>({
+    code: "",
+    name: "",
+    amountDollars: "150.00",
+    isActive: true,
+    priority: "100",
+  });
 
   useEffect(() => {
-    loadYear(initialYear);
+    void loadYear(initialYear);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialYear]);
 
@@ -87,9 +110,9 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
   const tabs = useMemo(
     () => [
       { key: "renewal" as const, label: "Renewal Window" },
-      { key: "pricing" as const, label: "Pricing" },
       { key: "capacity" as const, label: "Capacity" },
-      { key: "signup" as const, label: "Signup Day" },
+      { key: "signup" as const, label: "Signup + Apply" },
+      { key: "tiers" as const, label: "Pricing Tiers" },
     ],
     []
   );
@@ -99,12 +122,22 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     setRenewalOpensAt(toNyDateInput(settings.renewalOpensAt));
     setRenewalDueAt(toNyDateInput(settings.renewalDueAt));
     setMembershipCap(String(settings.membershipCap));
-    setStandardPriceDollars(centsToDollars(settings.standardPriceCents));
-    setDiscountPriceDollars(centsToDollars(settings.discountPriceCents));
     setSignupEnabled(settings.signupEnabled);
     setSignupDate(settings.signupDate ? toNyDateInput(settings.signupDate) : "");
     setApplicationEnabled(settings.applicationEnabled);
     setErrors({});
+  }
+
+  async function loadPricingTiers(targetYear: number) {
+    const response = await fetch(`/api/admin/pricing-tiers?year=${targetYear}`);
+    const payload = (await response.json()) as {
+      pricingTiers?: PricingTier[];
+      error?: string;
+    };
+    if (!response.ok || !payload.pricingTiers) {
+      throw new Error(payload.error ?? "Could not load pricing tiers.");
+    }
+    setPricingTiers(payload.pricingTiers);
   }
 
   async function loadYear(targetYear: number) {
@@ -122,6 +155,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
       }
 
       applySettings(payload.membershipYear);
+      await loadPricingTiers(targetYear);
       setToast({
         tone: "success",
         message: `Loaded settings for ${payload.membershipYear.year}.`,
@@ -154,18 +188,6 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
       nextErrors.membershipCap = "Must be an integer between 1 and 350.";
     }
 
-    const standard = Number(standardPriceDollars);
-    const discount = Number(discountPriceDollars);
-    if (!Number.isFinite(standard) || standard < 0) {
-      nextErrors.standardPriceDollars = "Must be a valid dollar amount.";
-    }
-    if (!Number.isFinite(discount) || discount < 0) {
-      nextErrors.discountPriceDollars = "Must be a valid dollar amount.";
-    }
-    if (Number.isFinite(standard) && Number.isFinite(discount) && discount > standard) {
-      nextErrors.discountPriceDollars = "Discount cannot exceed standard price.";
-    }
-
     if (signupEnabled && signupDate && !signupDate.startsWith(String(year))) {
       nextErrors.signupDate = "Signup date must be within the selected year.";
     }
@@ -174,7 +196,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     return Object.keys(nextErrors).length === 0;
   }
 
-  async function save() {
+  async function saveYearSettings() {
     if (!validateForm()) {
       setToast({ tone: "error", message: "Please fix validation errors before saving." });
       return;
@@ -192,8 +214,6 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
           renewalOpensAt,
           renewalDueAt,
           membershipCap: Number(membershipCap),
-          standardPriceCents: dollarsToCents(standardPriceDollars),
-          discountPriceCents: dollarsToCents(discountPriceDollars),
           signupEnabled,
           signupDate: signupDate || null,
           applicationEnabled,
@@ -219,6 +239,82 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function createTier() {
+    try {
+      const response = await fetch(`/api/admin/pricing-tiers?year=${loadedYear}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code: normalizeTierCode(newTier.code),
+          name: newTier.name,
+          amountCents: dollarsToCents(newTier.amountDollars),
+          isActive: newTier.isActive,
+          priority: Number(newTier.priority),
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not create pricing tier.");
+      }
+
+      await loadPricingTiers(loadedYear);
+      setNewTier({
+        code: "",
+        name: "",
+        amountDollars: "150.00",
+        isActive: true,
+        priority: "100",
+      });
+      setToast({ tone: "success", message: "Pricing tier created." });
+    } catch (error) {
+      setToast({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Could not create pricing tier.",
+      });
+    }
+  }
+
+  async function saveTier(tierId: string, draft: TierDraft) {
+    try {
+      const response = await fetch(`/api/admin/pricing-tiers/${tierId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code: normalizeTierCode(draft.code),
+          name: draft.name,
+          amountCents: dollarsToCents(draft.amountDollars),
+          isActive: draft.isActive,
+          priority: Number(draft.priority),
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not update pricing tier.");
+      }
+      await loadPricingTiers(loadedYear);
+      setToast({ tone: "success", message: "Pricing tier updated." });
+    } catch (error) {
+      setToast({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Could not update pricing tier.",
+      });
+    }
+  }
+
+  async function disableTier(tier: PricingTier) {
+    await saveTier(tier.id, {
+      code: tier.code,
+      name: tier.name,
+      amountDollars: centsToDollars(tier.amountCents),
+      isActive: false,
+      priority: String(tier.priority),
+    });
   }
 
   return (
@@ -251,7 +347,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
           <button
             className="rounded border px-4 py-2 text-sm font-medium"
             disabled={isLoading}
-            onClick={() => loadYear(year)}
+            onClick={() => void loadYear(year)}
             type="button"
           >
             {isLoading ? "Loading..." : "Load Year"}
@@ -265,9 +361,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
           {tabs.map((tab) => (
             <button
               className={`rounded-full px-3 py-1.5 text-sm ${
-                activeTab === tab.key
-                  ? "bg-gray-900 text-white"
-                  : "border bg-white text-gray-700"
+                activeTab === tab.key ? "bg-gray-900 text-white" : "border bg-white text-gray-700"
               }`}
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
@@ -290,9 +384,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
               />
               {errors.renewalOpensAt ? (
                 <span className="mt-1 block text-red-700">{errors.renewalOpensAt}</span>
-              ) : (
-                <span className="mt-1 block text-gray-500">First date renewal payments are allowed.</span>
-              )}
+              ) : null}
             </label>
             <label className="text-sm">
               <span className="mb-1 block font-medium">Renewal Due</span>
@@ -304,39 +396,6 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
               />
               {errors.renewalDueAt ? (
                 <span className="mt-1 block text-red-700">{errors.renewalDueAt}</span>
-              ) : (
-                <span className="mt-1 block text-gray-500">After this date, late policy applies.</span>
-              )}
-            </label>
-          </div>
-        ) : null}
-
-        {activeTab === "pricing" ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="text-sm">
-              <span className="mb-1 block font-medium">Standard Price (USD)</span>
-              <input
-                className="w-full rounded border p-2"
-                onChange={(event) => setStandardPriceDollars(event.target.value)}
-                step="0.01"
-                type="number"
-                value={standardPriceDollars}
-              />
-              {errors.standardPriceDollars ? (
-                <span className="mt-1 block text-red-700">{errors.standardPriceDollars}</span>
-              ) : null}
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block font-medium">Discount Price (USD)</span>
-              <input
-                className="w-full rounded border p-2"
-                onChange={(event) => setDiscountPriceDollars(event.target.value)}
-                step="0.01"
-                type="number"
-                value={discountPriceDollars}
-              />
-              {errors.discountPriceDollars ? (
-                <span className="mt-1 block text-red-700">{errors.discountPriceDollars}</span>
               ) : null}
             </label>
           </div>
@@ -356,11 +415,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
               />
               {errors.membershipCap ? (
                 <span className="mt-1 block text-red-700">{errors.membershipCap}</span>
-              ) : (
-                <span className="mt-1 block text-gray-500">
-                  Active enrollment limit for this year (maximum 350).
-                </span>
-              )}
+              ) : null}
             </label>
           </div>
         ) : null}
@@ -395,12 +450,97 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
               />
               {errors.signupDate ? (
                 <span className="mt-1 block text-red-700">{errors.signupDate}</span>
-              ) : (
-                <span className="mt-1 block text-gray-500">
-                  Leave blank to keep the default signup scheduling behavior.
-                </span>
-              )}
+              ) : null}
             </label>
+          </div>
+        ) : null}
+
+        {activeTab === "tiers" ? (
+          <div className="space-y-5">
+            <div className="overflow-x-auto rounded border">
+              <table className="min-w-full text-left text-sm">
+                <thead className="border-b bg-gray-50 text-xs uppercase text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2">Code</th>
+                    <th className="px-3 py-2">Name</th>
+                    <th className="px-3 py-2">Amount</th>
+                    <th className="px-3 py-2">Priority</th>
+                    <th className="px-3 py-2">Active</th>
+                    <th className="px-3 py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pricingTiers.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-3 text-gray-600" colSpan={6}>
+                        No pricing tiers found for this year.
+                      </td>
+                    </tr>
+                  ) : (
+                    pricingTiers.map((tier) => (
+                      <TierRow
+                        key={tier.id}
+                        onDisable={() => void disableTier(tier)}
+                        onSave={(draft) => void saveTier(tier.id, draft)}
+                        tier={tier}
+                      />
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="rounded border p-4">
+              <h3 className="text-sm font-semibold">Add Pricing Tier</h3>
+              <div className="mt-3 grid gap-3 md:grid-cols-5">
+                <input
+                  className="rounded border p-2 text-sm"
+                  onChange={(event) => setNewTier((state) => ({ ...state, code: event.target.value }))}
+                  placeholder="CODE"
+                  value={newTier.code}
+                />
+                <input
+                  className="rounded border p-2 text-sm"
+                  onChange={(event) => setNewTier((state) => ({ ...state, name: event.target.value }))}
+                  placeholder="Name"
+                  value={newTier.name}
+                />
+                <input
+                  className="rounded border p-2 text-sm"
+                  onChange={(event) =>
+                    setNewTier((state) => ({ ...state, amountDollars: event.target.value }))
+                  }
+                  placeholder="Amount USD"
+                  step="0.01"
+                  type="number"
+                  value={newTier.amountDollars}
+                />
+                <input
+                  className="rounded border p-2 text-sm"
+                  onChange={(event) => setNewTier((state) => ({ ...state, priority: event.target.value }))}
+                  placeholder="Priority"
+                  type="number"
+                  value={newTier.priority}
+                />
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    checked={newTier.isActive}
+                    onChange={(event) =>
+                      setNewTier((state) => ({ ...state, isActive: event.target.checked }))
+                    }
+                    type="checkbox"
+                  />
+                  Active
+                </label>
+              </div>
+              <button
+                className="mt-3 rounded border px-3 py-2 text-sm font-medium"
+                onClick={() => void createTier()}
+                type="button"
+              >
+                Create Tier
+              </button>
+            </div>
           </div>
         ) : null}
       </section>
@@ -409,12 +549,96 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
         <button
           className="rounded bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
           disabled={isSaving}
-          onClick={save}
+          onClick={() => void saveYearSettings()}
           type="button"
         >
-          {isSaving ? "Saving..." : "Save Settings"}
+          {isSaving ? "Saving..." : "Save Year Settings"}
         </button>
       </div>
     </div>
+  );
+}
+
+function TierRow({
+  tier,
+  onSave,
+  onDisable,
+}: {
+  tier: PricingTier;
+  onSave: (draft: TierDraft) => void;
+  onDisable: () => void;
+}) {
+  const [draft, setDraft] = useState<TierDraft>({
+    code: tier.code,
+    name: tier.name,
+    amountDollars: centsToDollars(tier.amountCents),
+    isActive: tier.isActive,
+    priority: String(tier.priority),
+  });
+
+  return (
+    <tr className="border-b">
+      <td className="px-3 py-2">
+        <input
+          className="w-32 rounded border p-1 text-sm"
+          onChange={(event) => setDraft((state) => ({ ...state, code: event.target.value }))}
+          value={draft.code}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          className="w-48 rounded border p-1 text-sm"
+          onChange={(event) => setDraft((state) => ({ ...state, name: event.target.value }))}
+          value={draft.name}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          className="w-28 rounded border p-1 text-sm"
+          onChange={(event) => setDraft((state) => ({ ...state, amountDollars: event.target.value }))}
+          step="0.01"
+          type="number"
+          value={draft.amountDollars}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          className="w-20 rounded border p-1 text-sm"
+          onChange={(event) => setDraft((state) => ({ ...state, priority: event.target.value }))}
+          type="number"
+          value={draft.priority}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            checked={draft.isActive}
+            onChange={(event) => setDraft((state) => ({ ...state, isActive: event.target.checked }))}
+            type="checkbox"
+          />
+          {draft.isActive ? "Yes" : "No"}
+        </label>
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex gap-2">
+          <button
+            className="rounded border px-2 py-1 text-xs font-medium"
+            onClick={() => onSave(draft)}
+            type="button"
+          >
+            Save
+          </button>
+          {tier.isActive ? (
+            <button
+              className="rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-700"
+              onClick={onDisable}
+              type="button"
+            >
+              Disable
+            </button>
+          ) : null}
+        </div>
+      </td>
+    </tr>
   );
 }
