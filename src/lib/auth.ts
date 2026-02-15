@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "crypto";
-import type { Role } from "@prisma/client";
+import type { MemberStatus, Role } from "@prisma/client";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import { redirect } from "next/navigation";
@@ -13,6 +13,7 @@ export type AuthUser = {
   memberId: string;
   email: string;
   role: Role;
+  status?: MemberStatus;
 };
 
 type SessionPayload = AuthUser & {
@@ -110,7 +111,7 @@ export async function authenticate(email: string, password: string): Promise<Aut
   const normalizedEmail = email.trim().toLowerCase();
   const member = await prisma.member.findUnique({ where: { email: normalizedEmail } });
 
-  if (!member || !member.isActive) {
+  if (!member || !member.isActive || member.status === "INACTIVE") {
     return null;
   }
 
@@ -122,6 +123,7 @@ export async function authenticate(email: string, password: string): Promise<Aut
     memberId: member.id,
     email: member.email,
     role: member.role,
+    status: member.status,
   };
 }
 

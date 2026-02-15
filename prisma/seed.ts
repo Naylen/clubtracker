@@ -1,5 +1,4 @@
 import { PrismaClient } from "@prisma/client";
-import { hashPassword } from "../src/lib/password";
 
 const prisma = new PrismaClient();
 
@@ -126,26 +125,7 @@ async function main() {
     },
   });
 
-  const adminEmail = (process.env.ADMIN_EMAIL ?? "admin@mcfgc.local").toLowerCase();
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "change-me-now";
-
-  await prisma.member.upsert({
-    where: { email: adminEmail },
-    update: {
-      name: "MCFGC Admin",
-      role: "ADMIN",
-      isActive: true,
-    },
-    create: {
-      name: "MCFGC Admin",
-      email: adminEmail,
-      passwordHash: hashPassword(adminPassword),
-      role: "ADMIN",
-      isActive: true,
-    },
-  });
-
-  console.log("Seed complete.");
+  console.log("Seed complete. (Admin account is managed by `npm run admin:bootstrap`)");
 }
 
 main()

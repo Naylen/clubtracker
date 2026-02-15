@@ -14,6 +14,11 @@ if [ -n "${DATABASE_URL:-}" ]; then
   echo "[entrypoint] running prisma migrate deploy"
   npx prisma migrate deploy
 
+  if [ "${ADMIN_BOOTSTRAP:-false}" = "true" ]; then
+    echo "[entrypoint] running admin bootstrap"
+    npm run admin:bootstrap
+  fi
+
   if [ "${SEED_ON_START:-false}" = "true" ]; then
     echo "[entrypoint] running prisma db seed"
     npx prisma db seed
