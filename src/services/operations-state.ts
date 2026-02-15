@@ -1,7 +1,15 @@
 import { Prisma, type MembershipYear } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
-import { countActiveEnrollments, getLateRenewalPolicy } from "@/services/membership";
+import {
+  countActiveEnrollments,
+  DEFAULT_MEMBERSHIP_CAP,
+  getLateRenewalPolicy,
+} from "@/services/membership";
+import {
+  ensureCurrentMembershipYear,
+  isDatabaseNotInitializedError,
+} from "@/services/bootstrap";
 
 const APPLICATION_WINDOW_KEY_PREFIX = "applicationWindow";
 
@@ -107,6 +115,11 @@ export function isApplicationOpenNow(input: {
 }
 
 export type CurrentYearOperationalState = {
+  dbReady: boolean;
+  currentYear: number;
+  applicationsOpen: boolean;
+  renewalOpen: boolean;
+  membershipCap: number;
   year: number;
   membershipYear: MembershipYear | null;
   applicationWindow: ApplicationWindow;
@@ -120,14 +133,63 @@ export type CurrentYearOperationalState = {
   alerts: string[];
 };
 
+function buildDbNotReadyState(year: number): CurrentYearOperationalState {
+  return {
+    dbReady: false,
+    currentYear: year,
+    applicationsOpen: false,
+    renewalOpen: false,
+    membershipCap: DEFAULT_MEMBERSHIP_CAP,
+    year,
+    membershipYear: null,
+    applicationWindow: { opensAt: null, closesAt: null },
+    applicationPublicOpen: false,
+    activeEnrollments: 0,
+    activeMembers: 0,
+    pendingApplications: 0,
+    unpaidRenewals: 0,
+    capacityRemaining: DEFAULT_MEMBERSHIP_CAP,
+    lateRenewalsEnabled: false,
+    alerts: ["Database is not initialized. Run migrations/seed."],
+  };
+}
+
+function isRenewalOpenNow(membershipYear: Pick<MembershipYear, "renewalOpensAt" | "renewalDueAt">): boolean {
+  const now = new Date();
+  return now >= membershipYear.renewalOpensAt && now <= membershipYear.renewalDueAt;
+}
+
 export async function getCurrentYearOperationalState(): Promise<CurrentYearOperationalState> {
   const year = getCurrentYearInNewYork();
-  const membershipYear = await prisma.membershipYear.findUnique({
-    where: { year },
-  });
+
+  try {
+    await ensureCurrentMembershipYear();
+  } catch (error) {
+    if (isDatabaseNotInitializedError(error)) {
+      return buildDbNotReadyState(year);
+    }
+    throw error;
+  }
+
+  let membershipYear: MembershipYear | null;
+  try {
+    membershipYear = await prisma.membershipYear.findUnique({
+      where: { year },
+    });
+  } catch (error) {
+    if (isDatabaseNotInitializedError(error)) {
+      return buildDbNotReadyState(year);
+    }
+    throw error;
+  }
 
   if (!membershipYear) {
     return {
+      dbReady: true,
+      currentYear: year,
+      applicationsOpen: false,
+      renewalOpen: false,
+      membershipCap: DEFAULT_MEMBERSHIP_CAP,
       year,
       membershipYear: null,
       applicationWindow: { opensAt: null, closesAt: null },
@@ -142,31 +204,48 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
     };
   }
 
-  const [window, latePolicy, activeEnrollments, activeMembers, pendingApplications, unpaidRenewals] =
-    await Promise.all([
-      getApplicationWindow(year),
-      getLateRenewalPolicy(),
-      countActiveEnrollments(membershipYear.id),
-      prisma.member.count({
-        where: {
-          role: "MEMBER",
-          isActive: true,
-          status: "ACTIVE",
-        },
-      }),
-      prisma.membershipApplication.count({
-        where: {
-          membershipYearId: membershipYear.id,
-          status: "SUBMITTED",
-        },
-      }),
-      prisma.membershipEnrollment.count({
-        where: {
-          membershipYearId: membershipYear.id,
-          status: "PENDING_RENEWAL",
-        },
-      }),
-    ]);
+  let window: ApplicationWindow = { opensAt: null, closesAt: null };
+  let latePolicy: Awaited<ReturnType<typeof getLateRenewalPolicy>> = {
+    enabled: false,
+    policyNotes: "",
+  };
+  let activeEnrollments = 0;
+  let activeMembers = 0;
+  let pendingApplications = 0;
+  let unpaidRenewals = 0;
+
+  try {
+    [window, latePolicy, activeEnrollments, activeMembers, pendingApplications, unpaidRenewals] =
+      await Promise.all([
+        getApplicationWindow(year),
+        getLateRenewalPolicy(),
+        countActiveEnrollments(membershipYear.id),
+        prisma.member.count({
+          where: {
+            role: "MEMBER",
+            isActive: true,
+            status: "ACTIVE",
+          },
+        }),
+        prisma.membershipApplication.count({
+          where: {
+            membershipYearId: membershipYear.id,
+            status: "SUBMITTED",
+          },
+        }),
+        prisma.membershipEnrollment.count({
+          where: {
+            membershipYearId: membershipYear.id,
+            status: "PENDING_RENEWAL",
+          },
+        }),
+      ]);
+  } catch (error) {
+    if (isDatabaseNotInitializedError(error)) {
+      return buildDbNotReadyState(year);
+    }
+    throw error;
+  }
 
   const applicationPublicOpen = isApplicationOpenNow({
     membershipYear,
@@ -194,6 +273,11 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
   }
 
   return {
+    dbReady: true,
+    currentYear: year,
+    applicationsOpen: applicationPublicOpen,
+    renewalOpen: isRenewalOpenNow(membershipYear),
+    membershipCap: membershipYear.membershipCap,
     year,
     membershipYear,
     applicationWindow: window,

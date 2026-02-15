@@ -7,6 +7,12 @@ export default async function HomePage() {
 
   return (
     <main className="mx-auto max-w-5xl space-y-8 p-8">
+      {!opsState.dbReady ? (
+        <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm">
+          {opsState.alerts[0] ?? "Database is not initialized. Run migrations/seed."}
+        </section>
+      ) : null}
+
       <section className="rounded-2xl border bg-white p-8 shadow-sm">
         <h1 className="text-4xl font-bold">Montgomery County Fish &amp; Game Club</h1>
         <p className="mt-2 text-lg text-gray-600">6701 Old Nest Egg Rd, Mt Sterling, KY 40353</p>

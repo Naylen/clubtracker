@@ -2,6 +2,7 @@ import { Prisma, type Member, type MembershipYear, type PricingTier } from "@pri
 import { prisma } from "@/lib/db";
 import {
   buildMembershipYearDates,
+  getFirstSaturdayInFebruary,
   getCurrentYearInNewYork,
   isSeniorFromDob,
 } from "@/lib/membership-dates";
@@ -194,7 +195,7 @@ export async function createOrOpenCurrentYear(asOf = new Date()) {
 
 export async function createOrOpenMembershipYear(year: number) {
   const dates = buildMembershipYearDates(year);
-  const defaultSignupDate = new Date(`${year}-02-01T09:00:00-05:00`);
+  const defaultSignupDate = getFirstSaturdayInFebruary(year);
 
   let membershipYear = await prisma.membershipYear.upsert({
     where: { year },
@@ -238,7 +239,7 @@ export async function createOrOpenMembershipYear(year: number) {
       key: signupOverrideKey,
       value: {
         year,
-        datetime: `${year}-02-01T09:00:00-05:00`,
+        datetime: defaultSignupDate.toISOString(),
       },
     },
   });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
+import { ensureCurrentMembershipYear } from "@/services/bootstrap";
 import {
   getOrCreateMembershipYearSettings,
   updateMembershipYearSettings,
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    await ensureCurrentMembershipYear();
     const year = parseYearParam(request);
     const membershipYear = await getOrCreateMembershipYearSettings(year);
     return NextResponse.json({ membershipYear });
@@ -45,6 +47,7 @@ export async function PUT(request: NextRequest) {
   }
 
   try {
+    await ensureCurrentMembershipYear();
     const year = parseYearParam(request);
     if (!year) {
       return NextResponse.json({ error: "year query parameter is required." }, { status: 400 });
