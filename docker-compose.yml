@@ -39,10 +39,9 @@ services:
     volumes:
       - .:/app
       - app_node_modules:/app/node_modules
-      - app_next:/app/.next
     command: >
       sh -c "if [ ! -d node_modules ] || [ -z \"$(ls -A node_modules 2>/dev/null)\" ];
-      then npm install; fi && npm run dev"
+      then npm install; fi && rm -rf .next && npm run dev"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -80,4 +79,3 @@ services:
 volumes:
   pgdata:
   app_node_modules:
-  app_next:
