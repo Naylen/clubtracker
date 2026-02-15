@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
 
 export default async function AdminLayout({
@@ -9,31 +8,21 @@ export default async function AdminLayout({
   const user = await requireAdmin("/admin");
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between p-4">
-          <nav className="flex items-center gap-4 text-sm">
-            <Link className="font-semibold" href="/admin">
-              Admin Dashboard
-            </Link>
-            <Link href="/admin/members">Member Roster</Link>
-            <Link href="/admin/applications">Applications</Link>
-            <Link href="/admin/settings">Settings</Link>
-            <Link href="/admin/payments">Payments</Link>
-            <Link href="/admin/communications">Communications</Link>
-            <Link href="/portal">Member Portal</Link>
-          </nav>
-          <div className="flex items-center gap-3 text-sm">
-            <span>{user.email}</span>
-            <form action="/api/auth/logout" method="post">
-              <button className="rounded border px-3 py-1.5" type="submit">
-                Sign Out
-              </button>
-            </form>
+    <div className="min-h-[calc(100vh-65px)] bg-gray-50">
+      <div className="border-b bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Admin Operations Console
+            </p>
+            <p className="text-sm text-gray-600">
+              Volunteer tools for membership-year operations and member support.
+            </p>
           </div>
+          <p className="text-xs text-gray-500">{user.email}</p>
         </div>
-      </header>
-      <main className="mx-auto max-w-6xl p-6">{children}</main>
+      </div>
+      <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
     </div>
   );
 }
