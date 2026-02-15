@@ -73,6 +73,8 @@ cp .env.example .env
 
 Use safe local values in `.env` (never commit real secrets).
 
+**Important:** when running with Docker Compose, set `DATABASE_URL` host to `db` (not `localhost`) and quote `EMAIL_FROM` (for example `EMAIL_FROM='MCFGC <notifications@mcfgcinc.com>'`).
+
 ### 2. Start app + Postgres (default)
 
 ```bash
@@ -90,6 +92,11 @@ docker compose exec app npx prisma db seed
 ```
 
 Seed requires an up-to-date schema, so run migrations first.
+
+### Troubleshooting
+
+- Error like `unexpected character '"'` or odd shell parsing: verify `.env` values are valid dotenv format, quote values with spaces (`EMAIL_FROM`), and fix Windows line endings if needed (`^M`/CRLF issues).
+- DB connection refused from app container: inside container, `localhost` points to itself. Use `DATABASE_URL=postgresql://...@db:5432/...`.
 
 ## Docker (Prod-like)
 
@@ -128,6 +135,12 @@ Guardrail: if `docker compose ps` shows only `db`, you started the wrong command
 `prisma db seed` requires migrations first and an app container (`app` or `app-prod`) to execute in.
 
 Windows note: if entrypoint fails with `^M`, Git line endings are wrong for shell files. `.gitattributes` in this repo enforces LF for `.sh`, Dockerfile, and compose YAML files.
+
+DL key generation (32-byte base64):
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
 
 ## Available Commands
 
