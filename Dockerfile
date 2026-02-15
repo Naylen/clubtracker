@@ -13,13 +13,16 @@ FROM deps AS dev
 
 COPY prisma ./prisma
 RUN npx prisma generate
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 EXPOSE 3000
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["npm", "run", "dev"]
 
 FROM deps AS builder
 
 COPY . .
-RUN npx prisma generate && npm run build
+RUN rm -rf .next && npx prisma generate && npm run build
 
 FROM base AS prod
 

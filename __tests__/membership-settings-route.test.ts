@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 const getUserFromRequest = vi.fn();
 const getOrCreateMembershipYearSettings = vi.fn();
 const updateMembershipYearSettings = vi.fn();
+const ensureCurrentMembershipYear = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
   getUserFromRequest,
@@ -14,10 +15,15 @@ vi.mock("@/services/membership-year-settings", () => ({
   updateMembershipYearSettings,
 }));
 
+vi.mock("@/services/bootstrap", () => ({
+  ensureCurrentMembershipYear,
+}));
+
 describe("Membership settings admin API RBAC", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    ensureCurrentMembershipYear.mockResolvedValue(undefined);
   });
 
   it("rejects MEMBER role for GET", async () => {

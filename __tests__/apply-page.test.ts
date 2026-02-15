@@ -39,6 +39,29 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/services/operations-state", () => ({
+  getCurrentYearOperationalState: vi.fn().mockResolvedValue({
+    dbReady: true,
+    setupRequired: false,
+    setupMessage: null,
+    currentYear: 2026,
+    applicationsOpen: false,
+    renewalOpen: false,
+    membershipCap: 350,
+    year: 2026,
+    membershipYear: null,
+    applicationWindow: { opensAt: null, closesAt: null },
+    applicationPublicOpen: false,
+    activeEnrollments: 0,
+    activeMembers: 0,
+    pendingApplications: 0,
+    unpaidRenewals: 0,
+    capacityRemaining: 350,
+    lateRenewalsEnabled: false,
+    alerts: [],
+  }),
+}));
+
 describe("/apply gating", () => {
   beforeEach(() => {
     vi.resetModules();

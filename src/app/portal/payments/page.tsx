@@ -1,5 +1,6 @@
 import { requireCurrentUser } from "@/lib/auth";
 import { PageHeader } from "@/components/ui/page-header";
+import { SetupRequiredBanner } from "@/components/ui/setup-required-banner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getMemberPortalState } from "@/services/member-portal";
 import { PayRenewalButton } from "../pay-renewal-button";
@@ -17,6 +18,17 @@ export default async function PortalPaymentsPage() {
     memberId: user.memberId,
     email: user.email,
   });
+
+  if (state.setupRequired) {
+    return (
+      <main className="mx-auto max-w-4xl space-y-6 p-6">
+        <PageHeader subtitle="Review renewal payment availability and amount." title="Payments" />
+        <SetupRequiredBanner
+          message={state.setupMessage ?? "Database is not initialized. Run migrations/seed."}
+        />
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto max-w-4xl space-y-6 p-6">

@@ -1,6 +1,7 @@
 import { Prisma, type MembershipYear } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
+import { logSetupIssueOnce, validateRuntimeEnvironment } from "@/lib/runtime-env";
 import {
   countActiveEnrollments,
   DEFAULT_MEMBERSHIP_CAP,
@@ -116,6 +117,8 @@ export function isApplicationOpenNow(input: {
 
 export type CurrentYearOperationalState = {
   dbReady: boolean;
+  setupRequired: boolean;
+  setupMessage: string | null;
   currentYear: number;
   applicationsOpen: boolean;
   renewalOpen: boolean;
@@ -133,9 +136,12 @@ export type CurrentYearOperationalState = {
   alerts: string[];
 };
 
-function buildDbNotReadyState(year: number): CurrentYearOperationalState {
+function buildDbNotReadyState(year: number, setupMessage?: string): CurrentYearOperationalState {
+  const message = setupMessage ?? "Database is not initialized. Run migrations/seed.";
   return {
     dbReady: false,
+    setupRequired: true,
+    setupMessage: message,
     currentYear: year,
     applicationsOpen: false,
     renewalOpen: false,
@@ -150,7 +156,7 @@ function buildDbNotReadyState(year: number): CurrentYearOperationalState {
     unpaidRenewals: 0,
     capacityRemaining: DEFAULT_MEMBERSHIP_CAP,
     lateRenewalsEnabled: false,
-    alerts: ["Database is not initialized. Run migrations/seed."],
+    alerts: [message],
   };
 }
 
@@ -161,11 +167,25 @@ function isRenewalOpenNow(membershipYear: Pick<MembershipYear, "renewalOpensAt" 
 
 export async function getCurrentYearOperationalState(): Promise<CurrentYearOperationalState> {
   const year = getCurrentYearInNewYork();
+  const envValidation = validateRuntimeEnvironment();
+
+  if (envValidation.setupRequired) {
+    logSetupIssueOnce(
+      `runtime-env:${envValidation.code}`,
+      `${envValidation.message ?? "Runtime environment validation failed."} See /setup for recovery steps.`
+    );
+    return buildDbNotReadyState(year, envValidation.message ?? undefined);
+  }
 
   try {
     await ensureCurrentMembershipYear();
   } catch (error) {
     if (isDatabaseNotInitializedError(error)) {
+      logSetupIssueOnce(
+        "database-not-initialized:ensure-current-year",
+        "Database schema is missing or migrations are not applied. Run `prisma migrate deploy` and seed.",
+        error
+      );
       return buildDbNotReadyState(year);
     }
     throw error;
@@ -178,6 +198,11 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
     });
   } catch (error) {
     if (isDatabaseNotInitializedError(error)) {
+      logSetupIssueOnce(
+        "database-not-initialized:membership-year-read",
+        "MembershipYear query failed because database schema is not initialized. Run migrations/seed.",
+        error
+      );
       return buildDbNotReadyState(year);
     }
     throw error;
@@ -186,6 +211,8 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
   if (!membershipYear) {
     return {
       dbReady: true,
+      setupRequired: false,
+      setupMessage: null,
       currentYear: year,
       applicationsOpen: false,
       renewalOpen: false,
@@ -242,6 +269,11 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
       ]);
   } catch (error) {
     if (isDatabaseNotInitializedError(error)) {
+      logSetupIssueOnce(
+        "database-not-initialized:operational-aggregates",
+        "Operational state queries failed because required tables are missing. Run migrations/seed.",
+        error
+      );
       return buildDbNotReadyState(year);
     }
     throw error;
@@ -274,6 +306,8 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
 
   return {
     dbReady: true,
+    setupRequired: false,
+    setupMessage: null,
     currentYear: year,
     applicationsOpen: applicationPublicOpen,
     renewalOpen: isRenewalOpenNow(membershipYear),

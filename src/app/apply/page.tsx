@@ -16,7 +16,9 @@ import {
   submitApplicationForExistingAccount,
 } from "@/services/application-flow";
 import { PageHeader } from "@/components/ui/page-header";
+import { SetupRequiredBanner } from "@/components/ui/setup-required-banner";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { getCurrentYearOperationalState } from "@/services/operations-state";
 
 type SearchParams = {
   success?: string;
@@ -65,6 +67,22 @@ async function getOpenApplicationYear() {
 }
 
 export default async function ApplyPage({ searchParams }: { searchParams: SearchParams }) {
+  const operationalState = await getCurrentYearOperationalState();
+  if (!operationalState.dbReady) {
+    return (
+      <main className="mx-auto max-w-5xl space-y-6 p-6">
+        <PageHeader subtitle="New-member applications are currently unavailable." title="New Member Application" />
+        <SetupRequiredBanner
+          message={
+            operationalState.setupMessage ??
+            operationalState.alerts[0] ??
+            "Database is not initialized. Run migrations/seed."
+          }
+        />
+      </main>
+    );
+  }
+
   const membershipYear = await getOpenApplicationYear();
   const currentUser = await getCurrentUser();
 

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 
 type BootstrapEnv = {
   ADMIN_BOOTSTRAP?: string;
+  ADMIN_ROTATE_PASSWORD?: string;
   ADMIN_EMAIL?: string;
   ADMIN_PASSWORD?: string;
 };
@@ -12,20 +13,22 @@ type BootstrapResult =
   | { outcome: "created"; email: string }
   | { outcome: "updated"; email: string };
 
-function isBootstrapEnabled(env: BootstrapEnv | NodeJS.ProcessEnv): boolean {
+function isLegacyBootstrapEnabled(env: BootstrapEnv | NodeJS.ProcessEnv): boolean {
   return String(env.ADMIN_BOOTSTRAP ?? "false").toLowerCase() === "true";
 }
 
+function isPasswordRotationEnabled(env: BootstrapEnv | NodeJS.ProcessEnv): boolean {
+  const rotateFlag = String(env.ADMIN_ROTATE_PASSWORD ?? "false").toLowerCase() === "true";
+  return rotateFlag || isLegacyBootstrapEnabled(env);
+}
+
 export async function runAdminBootstrap(options?: {
-  memberApi?: Pick<typeof prisma.member, "findUnique" | "create" | "update">;
+  memberApi?: Pick<typeof prisma.member, "findUnique" | "findFirst" | "create" | "update">;
   env?: BootstrapEnv;
 }): Promise<BootstrapResult> {
   const env = options?.env ?? process.env;
   const memberApi = options?.memberApi ?? prisma.member;
-
-  if (!isBootstrapEnabled(env)) {
-    return { outcome: "skipped", reason: "ADMIN_BOOTSTRAP is not enabled." };
-  }
+  const rotatePassword = isPasswordRotationEnabled(env);
 
   const email = String(env.ADMIN_EMAIL ?? "").trim().toLowerCase();
   const password = String(env.ADMIN_PASSWORD ?? "");
@@ -33,35 +36,54 @@ export async function runAdminBootstrap(options?: {
   if (!email || !password) {
     return {
       outcome: "skipped",
-      reason: "ADMIN_EMAIL and ADMIN_PASSWORD are required when ADMIN_BOOTSTRAP=true.",
+      reason: "ADMIN_EMAIL and ADMIN_PASSWORD are required for admin bootstrap.",
+    };
+  }
+
+  const [existingByEmail, anyAdmin] = await Promise.all([
+    memberApi.findUnique({ where: { email } }),
+    memberApi.findFirst({
+      where: { role: "ADMIN" },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
+
+  const noAdminExists = !anyAdmin;
+
+  if (!noAdminExists && !rotatePassword) {
+    return {
+      outcome: "skipped",
+      reason:
+        "Admin already exists. Set ADMIN_ROTATE_PASSWORD=true (or ADMIN_BOOTSTRAP=true) to rotate credentials.",
     };
   }
 
   const passwordHash = hashPassword(password);
-  const existing = await memberApi.findUnique({ where: { email } });
 
-  if (!existing) {
-    await memberApi.create({
+  if (existingByEmail) {
+    await memberApi.update({
+      where: { id: existingByEmail.id },
       data: {
-        name: "MCFGC Admin",
-        email,
-        passwordHash,
         role: "ADMIN",
         status: "ACTIVE",
         isActive: true,
+        passwordHash,
       },
     });
-    return { outcome: "created", email };
+
+    return { outcome: noAdminExists ? "created" : "updated", email };
   }
 
-  await memberApi.update({
-    where: { id: existing.id },
+  await memberApi.create({
     data: {
+      name: "MCFGC Admin",
+      email,
+      passwordHash,
       role: "ADMIN",
       status: "ACTIVE",
       isActive: true,
-      passwordHash,
     },
   });
-  return { outcome: "updated", email };
+
+  return { outcome: noAdminExists ? "created" : "updated", email };
 }

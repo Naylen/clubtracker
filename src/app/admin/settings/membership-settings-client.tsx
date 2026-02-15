@@ -231,25 +231,36 @@ export function MembershipSettingsClient({
     []
   );
 
-  const currentMembershipDraft: MembershipDraft = {
-    membershipCap,
-    renewalOpensAt,
-    renewalDueAt,
-    lateRenewalsEnabled,
-    lateRenewalPolicyNotes,
-    applicationEnabled,
-    applicationOpensAt,
-    applicationClosesAt,
-    signupEnabled,
-    signupDate,
-  };
-
   const membershipDirty = useMemo(
-    () =>
-      membershipBaseline
-        ? !areMembershipDraftsEqual(membershipBaseline, currentMembershipDraft)
-        : false,
-    [membershipBaseline, currentMembershipDraft]
+    () => {
+      const currentDraft: MembershipDraft = {
+        membershipCap,
+        renewalOpensAt,
+        renewalDueAt,
+        lateRenewalsEnabled,
+        lateRenewalPolicyNotes,
+        applicationEnabled,
+        applicationOpensAt,
+        applicationClosesAt,
+        signupEnabled,
+        signupDate,
+      };
+
+      return membershipBaseline ? !areMembershipDraftsEqual(membershipBaseline, currentDraft) : false;
+    },
+    [
+      membershipBaseline,
+      membershipCap,
+      renewalOpensAt,
+      renewalDueAt,
+      lateRenewalsEnabled,
+      lateRenewalPolicyNotes,
+      applicationEnabled,
+      applicationOpensAt,
+      applicationClosesAt,
+      signupEnabled,
+      signupDate,
+    ]
   );
 
   const dirtyTierIds = useMemo(

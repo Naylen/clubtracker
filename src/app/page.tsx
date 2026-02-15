@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getCurrentYearOperationalState } from "@/services/operations-state";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { SetupRequiredBanner } from "@/components/ui/setup-required-banner";
 
 export default async function HomePage() {
   const opsState = await getCurrentYearOperationalState();
@@ -8,9 +9,9 @@ export default async function HomePage() {
   return (
     <main className="mx-auto max-w-5xl space-y-8 p-8">
       {!opsState.dbReady ? (
-        <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm">
-          {opsState.alerts[0] ?? "Database is not initialized. Run migrations/seed."}
-        </section>
+        <SetupRequiredBanner
+          message={opsState.setupMessage ?? opsState.alerts[0] ?? "Database is not initialized. Run migrations/seed."}
+        />
       ) : null}
 
       <section className="rounded-2xl border bg-white p-8 shadow-sm">

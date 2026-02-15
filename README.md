@@ -37,7 +37,8 @@ Edit `.env` with your values:
 - `DATABASE_URL` — your Postgres connection string
 - `AUTH_SECRET` (or `NEXTAUTH_SECRET`) — generate with `openssl rand -base64 32`
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — admin bootstrap credentials
-- `ADMIN_BOOTSTRAP` — set `true` only when you need to create/reset admin credentials
+- `ADMIN_BOOTSTRAP` — legacy rotate flag (`true` rotates admin password)
+- `ADMIN_ROTATE_PASSWORD` — explicit password-rotation flag (`true` rotates admin password)
 - `DL_ENCRYPTION_KEY` — 32-byte key for encrypted driver-license storage (base64 or 64-char hex)
 - `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` — from Stripe dashboard (use test keys)
 - `STRIPE_WEBHOOK_SECRET` — from Stripe CLI or dashboard
@@ -54,7 +55,7 @@ Edit `.env` with your values:
 npx prisma generate       # Generate Prisma client
 npm run db:migrate        # Create/apply migrations
 npm run db:seed           # Seed initial data (membership year + settings)
-npm run admin:bootstrap   # Optional: create/reset admin when ADMIN_BOOTSTRAP=true
+npm run admin:bootstrap   # Create admin if missing; rotate only when rotate flag is true
 ```
 
 ### 4. Start dev server
@@ -75,7 +76,8 @@ cp .env.example .env
 
 Use safe local values in `.env` (never commit real secrets).
 
-**Important:** when running with Docker Compose, set `DATABASE_URL` host to `db` (not `localhost`) and quote `EMAIL_FROM` (for example `EMAIL_FROM='MCFGC <notifications@mcfgcinc.com>'`).
+**Important:** when running with Docker Compose, set `DATABASE_URL` host to `db` (not `localhost`) and quote `EMAIL_FROM` (for example `EMAIL_FROM='MCFGC <notifications@mcfgcinc.com>'`).  
+Inside containers, `localhost` points to the app container itself, not Postgres.
 
 ### 2. Start app + Postgres (default)
 
@@ -94,12 +96,14 @@ docker compose exec app npx prisma db seed
 docker compose exec app npm run admin:bootstrap
 ```
 
-Seed requires an up-to-date schema, so run migrations first.
+Seed requires an up-to-date schema, so run migrations first.  
+Dev/prod entrypoint runs `prisma migrate deploy` and `admin:bootstrap` on startup.
 
 ### Troubleshooting
 
 - Error like `unexpected character '"'` or odd shell parsing: verify `.env` values are valid dotenv format, quote values with spaces (`EMAIL_FROM`), and fix Windows line endings if needed (`^M`/CRLF issues).
 - DB connection refused from app container: inside container, `localhost` points to itself. Use `DATABASE_URL=postgresql://...@db:5432/...`.
+- If app shows **System Setup Required** at runtime, open `http://localhost:3000/setup` and run the listed migration/seed commands.
 - Error like `Cannot find module '../xxx.js'` (missing Next.js chunk): stale `.next` artifacts were mixed across runs/profiles. Reset with:
 
 ```bash
@@ -113,8 +117,11 @@ or on PowerShell without npm script:
 ```powershell
 docker compose down -v
 if (Test-Path .next) { Remove-Item -Recurse -Force .next }
+if (Test-Path .next-dev) { Remove-Item -Recurse -Force .next-dev }
 docker compose up --build -d
 ```
+
+Dev containers use `NEXT_DIST_DIR=.next-dev` to keep dev artifacts separate from production `.next` output.
 
 ## Docker (Prod-like)
 
@@ -186,7 +193,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 | `npm run db:migrate` | Create and run migrations |
 | `npm run db:migrate:deploy` | Apply existing migrations (deploy-safe) |
 | `npm run db:seed` | Seed database |
-| `npm run admin:bootstrap` | Create/reset admin user when `ADMIN_BOOTSTRAP=true` |
+| `npm run db:reset` | Docker-safe DB reset (`down -v`, then starts `db`) |
+| `npm run admin:bootstrap` | Create admin if missing; rotate password only when rotation flag is enabled |
 | `npm run db:studio` | Open Prisma Studio (DB GUI) |
 | `npm run docker:dev` | Docker Compose dev up/build |
 | `npm run docker:prod` | Docker Compose prod target up/build |
@@ -213,12 +221,12 @@ Use admin bootstrap to recover access without wiping the database:
 1. Set these in `.env`:
    - `ADMIN_EMAIL=your-admin-email`
    - `ADMIN_PASSWORD=your-new-password`
-   - `ADMIN_BOOTSTRAP=true`
+   - `ADMIN_ROTATE_PASSWORD=true` (or `ADMIN_BOOTSTRAP=true`)
 2. Restart app container or run bootstrap manually:
    - `docker compose exec app npm run admin:bootstrap`
    - or `docker compose --profile prod exec app-prod npm run admin:bootstrap`
 3. Log in at `/login`.
-4. Set `ADMIN_BOOTSTRAP=false` again after recovery.
+4. Set rotation flags back to `false` after recovery.
 
 ## Architecture
 

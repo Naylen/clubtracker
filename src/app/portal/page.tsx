@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireCurrentUser } from "@/lib/auth";
 import { PageHeader } from "@/components/ui/page-header";
+import { SetupRequiredBanner } from "@/components/ui/setup-required-banner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getMemberPortalState } from "@/services/member-portal";
 import { PayRenewalButton } from "./pay-renewal-button";
@@ -34,6 +35,20 @@ export default async function MemberPortalPage() {
     memberId: user.memberId,
     email: user.email,
   });
+
+  if (state.setupRequired) {
+    return (
+      <main className="mx-auto max-w-5xl space-y-6 p-6">
+        <PageHeader
+          subtitle="Your current-year membership and application status at a glance."
+          title="Member Portal"
+        />
+        <SetupRequiredBanner
+          message={state.setupMessage ?? "Database is not initialized. Run migrations/seed."}
+        />
+      </main>
+    );
+  }
 
   const appBadge = badgeForApplicationStatus(state.application?.status ?? null);
 

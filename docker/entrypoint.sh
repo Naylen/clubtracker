@@ -2,6 +2,11 @@
 set -e
 
 if [ -n "${DATABASE_URL:-}" ]; then
+  if [ ! -d node_modules ] || [ -z "$(ls -A node_modules 2>/dev/null)" ]; then
+    echo "[entrypoint] node_modules missing, running npm install"
+    npm install
+  fi
+
   echo "[entrypoint] waiting for postgres"
   until pg_isready \
     -h "${POSTGRES_HOST:-db}" \
@@ -14,10 +19,8 @@ if [ -n "${DATABASE_URL:-}" ]; then
   echo "[entrypoint] running prisma migrate deploy"
   npx prisma migrate deploy
 
-  if [ "${ADMIN_BOOTSTRAP:-false}" = "true" ]; then
-    echo "[entrypoint] running admin bootstrap"
-    npm run admin:bootstrap
-  fi
+  echo "[entrypoint] running admin bootstrap (create-if-missing; rotate only when enabled)"
+  npm run admin:bootstrap
 
   if [ "${SEED_ON_START:-false}" = "true" ]; then
     echo "[entrypoint] running prisma db seed"

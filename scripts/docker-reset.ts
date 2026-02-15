@@ -18,3 +18,7 @@ run("docker", ["compose", "down", "-v"]);
 const nextDir = resolve(process.cwd(), ".next");
 rmSync(nextDir, { recursive: true, force: true });
 console.log(`[docker:reset] removed ${nextDir}`);
+
+const nextDevDir = resolve(process.cwd(), ".next-dev");
+rmSync(nextDevDir, { recursive: true, force: true });
+console.log(`[docker:reset] removed ${nextDevDir}`);

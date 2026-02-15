@@ -4,6 +4,8 @@ import { MEMBER_DISCIPLINE_OPTIONS, parseDisciplineInterests } from "@/lib/disci
 import { requireCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui/page-header";
+import { SetupRequiredBanner } from "@/components/ui/setup-required-banner";
+import { getCurrentYearOperationalState } from "@/services/operations-state";
 
 function parseDateInput(value: FormDataEntryValue | null): Date | null {
   const raw = String(value ?? "").trim();
@@ -29,6 +31,23 @@ export default async function MemberProfilePage({
   searchParams: SearchParams;
 }) {
   const user = await requireCurrentUser("/portal/profile");
+  const operationalState = await getCurrentYearOperationalState();
+
+  if (!operationalState.dbReady) {
+    return (
+      <main className="mx-auto max-w-4xl space-y-6 p-6">
+        <PageHeader subtitle="Update your personal and emergency contact information." title="My Profile" />
+        <SetupRequiredBanner
+          message={
+            operationalState.setupMessage ??
+            operationalState.alerts[0] ??
+            "Database is not initialized. Run migrations/seed."
+          }
+        />
+      </main>
+    );
+  }
+
   const member = await prisma.member.findUnique({
     where: { id: user.memberId },
   });
