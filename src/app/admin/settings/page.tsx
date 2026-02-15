@@ -1,5 +1,6 @@
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { requireAdmin } from "@/lib/auth";
+import { PageHeader } from "@/components/ui/page-header";
 import { MembershipSettingsClient } from "./membership-settings-client";
 
 export default async function AdminSettingsPage() {
@@ -8,12 +9,10 @@ export default async function AdminSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Membership Settings</h1>
-        <p className="mt-1 text-sm text-gray-600">
-          Configure renewal windows, pricing, capacity, and signup day for each membership year.
-        </p>
-      </div>
+      <PageHeader
+        subtitle="Configure membership-year operations: applications, renewal windows, tiers, and signup day."
+        title="Settings"
+      />
 
       <MembershipSettingsClient initialYear={currentYear} />
     </div>

@@ -1,9 +1,13 @@
 import { prisma } from "@/lib/db";
 import { buildMembershipYearDates, getCurrentYearInNewYork } from "@/lib/membership-dates";
 import {
+  countActiveEnrollments,
   createOrOpenMembershipYear,
   DEFAULT_MEMBERSHIP_CAP,
+  getLateRenewalPolicy,
+  setLateRenewalPolicy,
 } from "@/services/membership";
+import { getApplicationWindow, setApplicationWindow } from "@/services/operations-state";
 
 export type MembershipYearSettingsResponse = {
   id: string;
@@ -18,6 +22,12 @@ export type MembershipYearSettingsResponse = {
   signupEnabled: boolean;
   signupDate: string | null;
   applicationEnabled: boolean;
+  applicationOpensAt: string | null;
+  applicationClosesAt: string | null;
+  lateRenewalsEnabled: boolean;
+  lateRenewalPolicyNotes: string;
+  activeEnrollments: number;
+  capacityRemaining: number;
 };
 
 type MembershipYearSettingsUpdateInput = {
@@ -29,6 +39,10 @@ type MembershipYearSettingsUpdateInput = {
   signupEnabled?: boolean;
   signupDate?: string | null;
   applicationEnabled?: boolean;
+  applicationOpensAt?: string | null;
+  applicationClosesAt?: string | null;
+  lateRenewalsEnabled?: boolean;
+  lateRenewalPolicyNotes?: string;
 };
 
 function ensureValidYear(year: number): number {
@@ -82,6 +96,15 @@ function toSettingsResponse(input: {
   signupEnabled: boolean;
   signupDate: Date | null;
   applicationEnabled: boolean;
+  applicationWindow: {
+    opensAt: string | null;
+    closesAt: string | null;
+  };
+  lateRenewalPolicy: {
+    enabled: boolean;
+    policyNotes: string;
+  };
+  activeEnrollments: number;
 }): MembershipYearSettingsResponse {
   return {
     id: input.id,
@@ -96,13 +119,29 @@ function toSettingsResponse(input: {
     signupEnabled: input.signupEnabled,
     signupDate: input.signupDate?.toISOString() ?? null,
     applicationEnabled: input.applicationEnabled,
+    applicationOpensAt: input.applicationWindow.opensAt,
+    applicationClosesAt: input.applicationWindow.closesAt,
+    lateRenewalsEnabled: input.lateRenewalPolicy.enabled,
+    lateRenewalPolicyNotes: input.lateRenewalPolicy.policyNotes,
+    activeEnrollments: input.activeEnrollments,
+    capacityRemaining: Math.max(0, input.membershipCap - input.activeEnrollments),
   };
 }
 
 export async function getOrCreateMembershipYearSettings(yearInput?: number) {
   const year = ensureValidYear(yearInput ?? getCurrentYearInNewYork());
   const membershipYear = await createOrOpenMembershipYear(year);
-  return toSettingsResponse(membershipYear);
+  const [applicationWindow, lateRenewalPolicy, activeEnrollments] = await Promise.all([
+    getApplicationWindow(year),
+    getLateRenewalPolicy(),
+    countActiveEnrollments(membershipYear.id),
+  ]);
+  return toSettingsResponse({
+    ...membershipYear,
+    applicationWindow,
+    lateRenewalPolicy,
+    activeEnrollments,
+  });
 }
 
 export async function updateMembershipYearSettings(input: {
@@ -192,5 +231,51 @@ export async function updateMembershipYearSettings(input: {
     },
   });
 
-  return toSettingsResponse(updated);
+  const lateRenewalsEnabled =
+    input.data.lateRenewalsEnabled !== undefined
+      ? Boolean(input.data.lateRenewalsEnabled)
+      : undefined;
+  const lateRenewalPolicyNotes =
+    input.data.lateRenewalPolicyNotes !== undefined
+      ? String(input.data.lateRenewalPolicyNotes)
+      : undefined;
+
+  if (lateRenewalsEnabled !== undefined || lateRenewalPolicyNotes !== undefined) {
+    const currentLatePolicy = await getLateRenewalPolicy();
+    await setLateRenewalPolicy({
+      enabled: lateRenewalsEnabled ?? currentLatePolicy.enabled,
+      policyNotes: lateRenewalPolicyNotes ?? currentLatePolicy.policyNotes,
+    });
+  }
+
+  if (
+    input.data.applicationOpensAt !== undefined ||
+    input.data.applicationClosesAt !== undefined
+  ) {
+    const currentWindow = await getApplicationWindow(year);
+    await setApplicationWindow({
+      year,
+      opensAt:
+        input.data.applicationOpensAt !== undefined
+          ? input.data.applicationOpensAt
+          : currentWindow.opensAt,
+      closesAt:
+        input.data.applicationClosesAt !== undefined
+          ? input.data.applicationClosesAt
+          : currentWindow.closesAt,
+    });
+  }
+
+  const [applicationWindow, lateRenewalPolicy, activeEnrollments] = await Promise.all([
+    getApplicationWindow(year),
+    getLateRenewalPolicy(),
+    countActiveEnrollments(updated.id),
+  ]);
+
+  return toSettingsResponse({
+    ...updated,
+    applicationWindow,
+    lateRenewalPolicy,
+    activeEnrollments,
+  });
 }

@@ -11,6 +11,12 @@ type MembershipYearSettings = {
   signupEnabled: boolean;
   signupDate: string | null;
   applicationEnabled: boolean;
+  applicationOpensAt: string | null;
+  applicationClosesAt: string | null;
+  lateRenewalsEnabled: boolean;
+  lateRenewalPolicyNotes: string;
+  activeEnrollments: number;
+  capacityRemaining: number;
 };
 
 type PricingTier = {
@@ -27,14 +33,12 @@ type ToastState = {
   message: string;
 } | null;
 
-type ActiveTab = "renewal" | "capacity" | "signup" | "tiers";
-
-type FormErrors = {
-  renewalOpensAt?: string;
-  renewalDueAt?: string;
-  membershipCap?: string;
-  signupDate?: string;
-};
+type ActiveTab =
+  | "membership_year"
+  | "pricing_tiers"
+  | "application_settings"
+  | "renewal_settings"
+  | "signup_day";
 
 type TierDraft = {
   code: string;
@@ -44,8 +48,16 @@ type TierDraft = {
   priority: string;
 };
 
-function toNyDateInput(isoDate: string): string {
+function toNyDateInput(isoDate: string | null): string {
+  if (!isoDate) {
+    return "";
+  }
+
   const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
     year: "numeric",
@@ -71,18 +83,32 @@ function normalizeTierCode(input: string): string {
   return input.trim().toUpperCase().replace(/\s+/g, "_");
 }
 
+function parseLocalDateForApi(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export function MembershipSettingsClient({ initialYear }: { initialYear: number }) {
   const [year, setYear] = useState(initialYear);
   const [loadedYear, setLoadedYear] = useState(initialYear);
+  const [membershipCap, setMembershipCap] = useState("350");
+  const [activeEnrollments, setActiveEnrollments] = useState(0);
+  const [capacityRemaining, setCapacityRemaining] = useState(0);
+
   const [renewalOpensAt, setRenewalOpensAt] = useState("");
   const [renewalDueAt, setRenewalDueAt] = useState("");
-  const [membershipCap, setMembershipCap] = useState("350");
+  const [lateRenewalsEnabled, setLateRenewalsEnabled] = useState(false);
+  const [lateRenewalPolicyNotes, setLateRenewalPolicyNotes] = useState("");
+
+  const [applicationEnabled, setApplicationEnabled] = useState(false);
+  const [applicationOpensAt, setApplicationOpensAt] = useState("");
+  const [applicationClosesAt, setApplicationClosesAt] = useState("");
+
   const [signupEnabled, setSignupEnabled] = useState(true);
   const [signupDate, setSignupDate] = useState("");
-  const [applicationEnabled, setApplicationEnabled] = useState(false);
+
   const [pricingTiers, setPricingTiers] = useState<PricingTier[]>([]);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("renewal");
-  const [errors, setErrors] = useState<FormErrors>({});
+  const [activeTab, setActiveTab] = useState<ActiveTab>("membership_year");
   const [toast, setToast] = useState<ToastState>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -109,23 +135,32 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
 
   const tabs = useMemo(
     () => [
-      { key: "renewal" as const, label: "Renewal Window" },
-      { key: "capacity" as const, label: "Capacity" },
-      { key: "signup" as const, label: "Signup + Apply" },
-      { key: "tiers" as const, label: "Pricing Tiers" },
+      { key: "membership_year" as const, label: "Membership Year" },
+      { key: "pricing_tiers" as const, label: "Pricing Tiers" },
+      { key: "application_settings" as const, label: "Application Settings" },
+      { key: "renewal_settings" as const, label: "Renewal Settings" },
+      { key: "signup_day" as const, label: "Signup Day" },
     ],
     []
   );
 
   function applySettings(settings: MembershipYearSettings) {
     setLoadedYear(settings.year);
+    setMembershipCap(String(settings.membershipCap));
+    setActiveEnrollments(settings.activeEnrollments);
+    setCapacityRemaining(settings.capacityRemaining);
+
     setRenewalOpensAt(toNyDateInput(settings.renewalOpensAt));
     setRenewalDueAt(toNyDateInput(settings.renewalDueAt));
-    setMembershipCap(String(settings.membershipCap));
-    setSignupEnabled(settings.signupEnabled);
-    setSignupDate(settings.signupDate ? toNyDateInput(settings.signupDate) : "");
+    setLateRenewalsEnabled(settings.lateRenewalsEnabled);
+    setLateRenewalPolicyNotes(settings.lateRenewalPolicyNotes);
+
     setApplicationEnabled(settings.applicationEnabled);
-    setErrors({});
+    setApplicationOpensAt(toNyDateInput(settings.applicationOpensAt));
+    setApplicationClosesAt(toNyDateInput(settings.applicationClosesAt));
+
+    setSignupEnabled(settings.signupEnabled);
+    setSignupDate(toNyDateInput(settings.signupDate));
   }
 
   async function loadPricingTiers(targetYear: number) {
@@ -134,15 +169,17 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
       pricingTiers?: PricingTier[];
       error?: string;
     };
+
     if (!response.ok || !payload.pricingTiers) {
       throw new Error(payload.error ?? "Could not load pricing tiers.");
     }
+
     setPricingTiers(payload.pricingTiers);
   }
 
   async function loadYear(targetYear: number) {
     setIsLoading(true);
-    setErrors({});
+
     try {
       const response = await fetch(`/api/admin/membership-year?year=${targetYear}`);
       const payload = (await response.json()) as {
@@ -156,10 +193,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
 
       applySettings(payload.membershipYear);
       await loadPricingTiers(targetYear);
-      setToast({
-        tone: "success",
-        message: `Loaded settings for ${payload.membershipYear.year}.`,
-      });
+      setToast({ tone: "success", message: `Loaded settings for ${payload.membershipYear.year}.` });
     } catch (error) {
       setToast({
         tone: "error",
@@ -170,53 +204,26 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
     }
   }
 
-  function validateForm(): boolean {
-    const nextErrors: FormErrors = {};
-
-    if (!renewalOpensAt) {
-      nextErrors.renewalOpensAt = "Required.";
-    }
-    if (!renewalDueAt) {
-      nextErrors.renewalDueAt = "Required.";
-    }
-    if (renewalOpensAt && renewalDueAt && renewalOpensAt > renewalDueAt) {
-      nextErrors.renewalDueAt = "Due date must be on or after open date.";
-    }
-
-    const parsedCap = Number(membershipCap);
-    if (!Number.isInteger(parsedCap) || parsedCap < 1 || parsedCap > 350) {
-      nextErrors.membershipCap = "Must be an integer between 1 and 350.";
-    }
-
-    if (signupEnabled && signupDate && !signupDate.startsWith(String(year))) {
-      nextErrors.signupDate = "Signup date must be within the selected year.";
-    }
-
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  }
-
   async function saveYearSettings() {
-    if (!validateForm()) {
-      setToast({ tone: "error", message: "Please fix validation errors before saving." });
-      return;
-    }
-
     setIsSaving(true);
 
     try {
-      const response = await fetch(`/api/admin/membership-year?year=${year}`, {
+      const response = await fetch(`/api/admin/membership-year?year=${loadedYear}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          membershipCap: Number(membershipCap),
           renewalOpensAt,
           renewalDueAt,
-          membershipCap: Number(membershipCap),
-          signupEnabled,
-          signupDate: signupDate || null,
+          lateRenewalsEnabled,
+          lateRenewalPolicyNotes,
           applicationEnabled,
+          applicationOpensAt: parseLocalDateForApi(applicationOpensAt),
+          applicationClosesAt: parseLocalDateForApi(applicationClosesAt),
+          signupEnabled,
+          signupDate: parseLocalDateForApi(signupDate),
         }),
       });
 
@@ -230,11 +237,11 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
       }
 
       applySettings(payload.membershipYear);
-      setToast({ tone: "success", message: "Membership settings saved." });
+      setToast({ tone: "success", message: "Membership year settings saved." });
     } catch (error) {
       setToast({
         tone: "error",
-        message: error instanceof Error ? error.message : "Could not save membership settings.",
+        message: error instanceof Error ? error.message : "Could not save settings.",
       });
     } finally {
       setIsSaving(false);
@@ -297,6 +304,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
       if (!response.ok) {
         throw new Error(payload.error ?? "Could not update pricing tier.");
       }
+
       await loadPricingTiers(loadedYear);
       setToast({ tone: "success", message: "Pricing tier updated." });
     } catch (error) {
@@ -372,37 +380,10 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
           ))}
         </div>
 
-        {activeTab === "renewal" ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="text-sm">
-              <span className="mb-1 block font-medium">Renewal Opens</span>
-              <input
-                className="w-full rounded border p-2"
-                onChange={(event) => setRenewalOpensAt(event.target.value)}
-                type="date"
-                value={renewalOpensAt}
-              />
-              {errors.renewalOpensAt ? (
-                <span className="mt-1 block text-red-700">{errors.renewalOpensAt}</span>
-              ) : null}
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block font-medium">Renewal Due</span>
-              <input
-                className="w-full rounded border p-2"
-                onChange={(event) => setRenewalDueAt(event.target.value)}
-                type="date"
-                value={renewalDueAt}
-              />
-              {errors.renewalDueAt ? (
-                <span className="mt-1 block text-red-700">{errors.renewalDueAt}</span>
-              ) : null}
-            </label>
-          </div>
-        ) : null}
-
-        {activeTab === "capacity" ? (
-          <div className="max-w-sm">
+        {activeTab === "membership_year" ? (
+          <div className="grid gap-4 md:grid-cols-3">
+            <MetricCard label="Active Members" value={activeEnrollments} />
+            <MetricCard label="Capacity Remaining" value={capacityRemaining} />
             <label className="text-sm">
               <span className="mb-1 block font-medium">Membership Cap</span>
               <input
@@ -413,14 +394,94 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
                 type="number"
                 value={membershipCap}
               />
-              {errors.membershipCap ? (
-                <span className="mt-1 block text-red-700">{errors.membershipCap}</span>
-              ) : null}
+              <span className="mt-1 block text-xs text-gray-500">
+                Capacity controls the number of ACTIVE enrollments allowed for the year.
+              </span>
             </label>
           </div>
         ) : null}
 
-        {activeTab === "signup" ? (
+        {activeTab === "application_settings" ? (
+          <div className="space-y-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                checked={applicationEnabled}
+                onChange={(event) => setApplicationEnabled(event.target.checked)}
+                type="checkbox"
+              />
+              Applications Open (Public /apply)
+            </label>
+            <p className="text-xs text-gray-500">
+              Applicants can only access /apply while this toggle is enabled and any optional window dates allow it.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm">
+                <span className="mb-1 block font-medium">Public Open Date (optional)</span>
+                <input
+                  className="w-full rounded border p-2"
+                  onChange={(event) => setApplicationOpensAt(event.target.value)}
+                  type="date"
+                  value={applicationOpensAt}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block font-medium">Public Close Date (optional)</span>
+                <input
+                  className="w-full rounded border p-2"
+                  onChange={(event) => setApplicationClosesAt(event.target.value)}
+                  type="date"
+                  value={applicationClosesAt}
+                />
+              </label>
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "renewal_settings" ? (
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm">
+                <span className="mb-1 block font-medium">Renewal Opens</span>
+                <input
+                  className="w-full rounded border p-2"
+                  onChange={(event) => setRenewalOpensAt(event.target.value)}
+                  type="date"
+                  value={renewalOpensAt}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block font-medium">Renewal Due</span>
+                <input
+                  className="w-full rounded border p-2"
+                  onChange={(event) => setRenewalDueAt(event.target.value)}
+                  type="date"
+                  value={renewalDueAt}
+                />
+              </label>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                checked={lateRenewalsEnabled}
+                onChange={(event) => setLateRenewalsEnabled(event.target.checked)}
+                type="checkbox"
+              />
+              Accept Late Renewals
+            </label>
+
+            <label className="text-sm">
+              <span className="mb-1 block font-medium">Late Renewal Policy Notes</span>
+              <textarea
+                className="w-full rounded border p-2"
+                onChange={(event) => setLateRenewalPolicyNotes(event.target.value)}
+                rows={3}
+                value={lateRenewalPolicyNotes}
+              />
+            </label>
+          </div>
+        ) : null}
+
+        {activeTab === "signup_day" ? (
           <div className="space-y-4">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -428,34 +489,22 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
                 onChange={(event) => setSignupEnabled(event.target.checked)}
                 type="checkbox"
               />
-              Signup day enabled
-            </label>
-
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                checked={applicationEnabled}
-                onChange={(event) => setApplicationEnabled(event.target.checked)}
-                type="checkbox"
-              />
-              Applications Open (public /apply)
+              Signup Day Scheduled
             </label>
 
             <label className="text-sm">
-              <span className="mb-1 block font-medium">Signup Date Override (optional)</span>
+              <span className="mb-1 block font-medium">Signup Day Override</span>
               <input
                 className="w-full max-w-sm rounded border p-2"
                 onChange={(event) => setSignupDate(event.target.value)}
                 type="date"
                 value={signupDate}
               />
-              {errors.signupDate ? (
-                <span className="mt-1 block text-red-700">{errors.signupDate}</span>
-              ) : null}
             </label>
           </div>
         ) : null}
 
-        {activeTab === "tiers" ? (
+        {activeTab === "pricing_tiers" ? (
           <div className="space-y-5">
             <div className="overflow-x-auto rounded border">
               <table className="min-w-full text-left text-sm">
@@ -473,7 +522,7 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
                   {pricingTiers.length === 0 ? (
                     <tr>
                       <td className="px-3 py-3 text-gray-600" colSpan={6}>
-                        No pricing tiers found for this year.
+                        No pricing tiers configured for this year.
                       </td>
                     </tr>
                   ) : (
@@ -552,10 +601,19 @@ export function MembershipSettingsClient({ initialYear }: { initialYear: number 
           onClick={() => void saveYearSettings()}
           type="button"
         >
-          {isSaving ? "Saving..." : "Save Year Settings"}
+          {isSaving ? "Saving..." : "Save Settings"}
         </button>
       </div>
     </div>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: number }) {
+  return (
+    <article className="rounded border p-4">
+      <p className="text-xs uppercase tracking-wide text-gray-500">{label}</p>
+      <p className="mt-2 text-2xl font-bold">{value}</p>
+    </article>
   );
 }
 

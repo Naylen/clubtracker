@@ -166,6 +166,27 @@ export async function getLateRenewalPolicy(): Promise<LateRenewalPolicy> {
   };
 }
 
+export async function setLateRenewalPolicy(input: LateRenewalPolicy): Promise<LateRenewalPolicy> {
+  const payload = {
+    enabled: Boolean(input.enabled),
+    policyNotes:
+      input.policyNotes.trim().length > 0
+        ? input.policyNotes.trim()
+        : "Default policy: payments after Jan 31 are not accepted.",
+  };
+
+  await prisma.systemSettings.upsert({
+    where: { key: ACCEPT_LATE_RENEWALS_KEY },
+    update: { value: payload },
+    create: {
+      key: ACCEPT_LATE_RENEWALS_KEY,
+      value: payload,
+    },
+  });
+
+  return payload;
+}
+
 export async function createOrOpenCurrentYear(asOf = new Date()) {
   const year = getCurrentYearInNewYork(asOf);
   return createOrOpenMembershipYear(year);
