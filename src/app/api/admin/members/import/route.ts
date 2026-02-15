@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
         createImportAuditLog: async (audit) => {
           await prisma.communicationLog.create({
             data: {
-              memberId: audit.actorMemberId,
+              memberId: null,
               channel: "EMAIL",
               toAddress: audit.actorEmail,
               subject: "MEMBERS_CSV_IMPORT",

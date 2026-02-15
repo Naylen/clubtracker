@@ -11,6 +11,9 @@ vi.mock("@/lib/db", () => ({
     membershipYear: {
       findUnique: membershipYearFindUnique,
     },
+    systemSettings: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 

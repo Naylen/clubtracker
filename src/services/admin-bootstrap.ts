@@ -12,7 +12,7 @@ type BootstrapResult =
   | { outcome: "created"; email: string }
   | { outcome: "updated"; email: string };
 
-function isBootstrapEnabled(env: BootstrapEnv): boolean {
+function isBootstrapEnabled(env: BootstrapEnv | NodeJS.ProcessEnv): boolean {
   return String(env.ADMIN_BOOTSTRAP ?? "false").toLowerCase() === "true";
 }
 

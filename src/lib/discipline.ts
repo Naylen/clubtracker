@@ -28,7 +28,7 @@ export function parseDisciplineInterests(input: unknown): MemberDiscipline[] {
     }
   }
 
-  return [...new Set(parsed)];
+  return Array.from(new Set(parsed));
 }
 
 export function validateDisciplineInterests(input: unknown): {
