@@ -29,12 +29,18 @@ export default async function ApplicationDetailPage({
   params: { id: string };
   searchParams: SearchParams;
 }) {
-  const adminUser = await requireAdmin(`/admin/applications/${params.id}`);
+  await requireAdmin(`/admin/applications/${params.id}`);
 
   const application = await prisma.membershipApplication.findUnique({
     where: { id: params.id },
     include: {
-      member: true,
+      createdMember: {
+        select: {
+          id: true,
+          email: true,
+          isActive: true,
+        },
+      },
       membershipYear: true,
       assignedPricingTier: true,
       reviewedByMember: {
@@ -56,7 +62,7 @@ export default async function ApplicationDetailPage({
       membershipYearId: application.membershipYearId,
       isActive: true,
     },
-    orderBy: [{ isSenior: "desc" }, { amountCents: "asc" }, { name: "asc" }],
+    orderBy: [{ priority: "asc" }, { amountCents: "asc" }, { name: "asc" }],
   });
 
   const tierByCode = new Map(tiers.map((tier) => [tier.code, tier]));
@@ -65,10 +71,10 @@ export default async function ApplicationDetailPage({
     year: application.membershipYear.year,
     signupDate: application.membershipYear.signupDate,
   });
-  const ageOnSignupDay = application.member.dob
-    ? calculateAgeOnDate(application.member.dob, signupDay)
+  const ageOnSignupDay = application.applicantDob
+    ? calculateAgeOnDate(application.applicantDob, signupDay)
     : null;
-  const seniorAutoEligible = isSeniorOnDate(application.member.dob, signupDay);
+  const seniorAutoEligible = isSeniorOnDate(application.applicantDob, signupDay);
 
   const suggestedTier =
     (seniorAutoEligible ? tierByCode.get("SENIOR") : undefined) ??
@@ -93,7 +99,6 @@ export default async function ApplicationDetailPage({
     const appRecord = await prisma.membershipApplication.findUnique({
       where: { id: applicationId },
       include: {
-        member: true,
         membershipYear: true,
       },
     });
@@ -113,7 +118,7 @@ export default async function ApplicationDetailPage({
       year: appRecord.membershipYear.year,
       signupDate: appRecord.membershipYear.signupDate,
     });
-    const seniorAuto = isSeniorOnDate(appRecord.member.dob, computedSignupDay);
+    const seniorAuto = isSeniorOnDate(appRecord.applicantDob, computedSignupDay);
     const isSeniorOverride = seniorAuto && tier.code !== "SENIOR";
 
     if (isSeniorOverride && !confirmSeniorOverride) {
@@ -142,10 +147,11 @@ export default async function ApplicationDetailPage({
     await createAuditLog({
       action: "APPLICATION_APPROVED",
       actorMemberId: reviewer.memberId,
-      targetMemberId: appRecord.memberId,
+      targetMemberId: appRecord.createdMemberId,
       meta: {
         membershipApplicationId: appRecord.id,
         membershipYearId: appRecord.membershipYearId,
+        applicantEmail: appRecord.applicantEmail,
         assignedPricingTierId: tier.id,
         assignedPricingTierCode: tier.code,
         disabledVeteranApproved: disabledVetApprovedValue,
@@ -176,7 +182,7 @@ export default async function ApplicationDetailPage({
       where: { id: applicationId },
       select: {
         id: true,
-        memberId: true,
+        createdMemberId: true,
         membershipYearId: true,
       },
     });
@@ -200,7 +206,7 @@ export default async function ApplicationDetailPage({
     await createAuditLog({
       action: "APPLICATION_DENIED",
       actorMemberId: reviewer.memberId,
-      targetMemberId: appRecord.memberId,
+      targetMemberId: appRecord.createdMemberId,
       meta: {
         membershipApplicationId: appRecord.id,
         membershipYearId: appRecord.membershipYearId,
@@ -238,14 +244,21 @@ export default async function ApplicationDetailPage({
         <h2 className="text-xl font-semibold">Applicant</h2>
         <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
           <p>
-            <span className="font-medium">Name:</span> {application.member.name}
+            <span className="font-medium">Name:</span> {application.applicantFirstName}{" "}
+            {application.applicantLastName}
           </p>
           <p>
-            <span className="font-medium">Email:</span> {application.member.email}
+            <span className="font-medium">Email:</span> {application.applicantEmail}
+          </p>
+          <p>
+            <span className="font-medium">Phone:</span> {application.applicantPhone ?? "Not provided"}
+          </p>
+          <p>
+            <span className="font-medium">Address:</span> {application.applicantAddress ?? "Not provided"}
           </p>
           <p>
             <span className="font-medium">DOB:</span>{" "}
-            {application.member.dob ? application.member.dob.toLocaleDateString() : "Not provided"}
+            {application.applicantDob ? application.applicantDob.toLocaleDateString() : "Not provided"}
           </p>
           <p>
             <span className="font-medium">Age on signup day:</span>{" "}
@@ -266,6 +279,12 @@ export default async function ApplicationDetailPage({
           <p>
             <span className="font-medium">Current status:</span> {application.status}
           </p>
+          <p className="sm:col-span-2">
+            <span className="font-medium">Account linked:</span>{" "}
+            {application.createdMember
+              ? `${application.createdMember.email} (${application.createdMember.isActive ? "ACTIVE" : "INACTIVE"})`
+              : "No account linked"}
+          </p>
         </div>
       </section>
 
@@ -281,7 +300,7 @@ export default async function ApplicationDetailPage({
               name="assignedPricingTierId"
               required
             >
-              <option value="" disabled>
+              <option disabled value="">
                 Select tier
               </option>
               {tiers.map((tier) => (

@@ -54,7 +54,7 @@ export default async function AdminApplicationsPage({
           ...(selectedStatus !== "ALL" ? { status: selectedStatus } : {}),
         },
         include: {
-          member: {
+          createdMember: {
             select: {
               id: true,
               name: true,
@@ -133,8 +133,15 @@ export default async function AdminApplicationsPage({
                 {applications.map((application) => (
                   <tr className="border-b" key={application.id}>
                     <td className="px-3 py-2">
-                      <div className="font-medium">{application.member.name}</div>
-                      <div className="text-xs text-gray-600">{application.member.email}</div>
+                      <div className="font-medium">
+                        {application.applicantFirstName} {application.applicantLastName}
+                      </div>
+                      <div className="text-xs text-gray-600">{application.applicantEmail}</div>
+                      {application.createdMember ? (
+                        <div className="text-xs text-gray-500">
+                          Account: {application.createdMember.email}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2">
                       <span className="rounded-full border px-2 py-0.5 text-xs">

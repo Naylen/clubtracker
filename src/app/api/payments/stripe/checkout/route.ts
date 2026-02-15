@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import {
   countActiveEnrollments,
+  determineRenewalTierForMember,
   isRenewalBlockedByLatePolicy,
 } from "@/services/membership";
 import { stripePaymentService } from "@/services/payment";
@@ -43,9 +44,9 @@ export async function POST(request: NextRequest) {
 
   const application = await prisma.membershipApplication.findUnique({
     where: {
-      memberId_membershipYearId: {
-        memberId: member.id,
+      membershipYearId_applicantEmail: {
         membershipYearId: membershipYear.id,
+        applicantEmail: member.email,
       },
     },
     include: {
@@ -53,35 +54,13 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  if (!application) {
-    return NextResponse.json(
-      { error: "No application found. Submit an application before payment." },
-      { status: 409 }
-    );
-  }
-
-  if (application.status !== "APPROVED") {
-    const statusMessages: Record<string, string> = {
-      DRAFT: "Your application is still in draft. Submit it for review first.",
-      SUBMITTED: "Awaiting admin approval before payment is available.",
-      DENIED: application.denialReason
-        ? `Application denied: ${application.denialReason}`
-        : "Application denied. Contact an administrator for details.",
-    };
-    return NextResponse.json(
-      {
-        error: statusMessages[application.status] ?? "Application is not approved yet.",
+  const hasMembershipHistory =
+    (await prisma.membershipEnrollment.count({
+      where: {
+        memberId: member.id,
+        status: "ACTIVE",
       },
-      { status: 409 }
-    );
-  }
-
-  if (!application.assignedPricingTier || !application.assignedPricingTier.isActive) {
-    return NextResponse.json(
-      { error: "No active pricing tier is assigned to this application." },
-      { status: 409 }
-    );
-  }
+    })) > 0;
 
   const existingEnrollment = await prisma.membershipEnrollment.findUnique({
     where: {
@@ -102,6 +81,71 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  let selectedTier:
+    | {
+        code: string;
+        name: string;
+        amountCents: number;
+      }
+    | null = null;
+  let isRenewalCheckout = false;
+
+  if (application) {
+    if (application.status !== "APPROVED") {
+      const statusMessages: Record<string, string> = {
+        DRAFT: "Your application is still in draft. Submit it for review first.",
+        SUBMITTED: "Awaiting admin approval before payment is available.",
+        DENIED: application.denialReason
+          ? `Application denied: ${application.denialReason}`
+          : "Application denied. Contact an administrator for details.",
+      };
+      return NextResponse.json(
+        {
+          error: statusMessages[application.status] ?? "Application is not approved yet.",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (!application.assignedPricingTier || !application.assignedPricingTier.isActive) {
+      return NextResponse.json(
+        { error: "No active pricing tier is assigned to this application." },
+        { status: 409 }
+      );
+    }
+
+    selectedTier = {
+      code: application.assignedPricingTier.code,
+      name: application.assignedPricingTier.name,
+      amountCents: application.assignedPricingTier.amountCents,
+    };
+  } else if (hasMembershipHistory || existingEnrollment) {
+    const renewalTier = await determineRenewalTierForMember({
+      member,
+      membershipYear,
+    });
+    if (!renewalTier) {
+      return NextResponse.json(
+        { error: "No active pricing tier is available for renewals this year." },
+        { status: 409 }
+      );
+    }
+    selectedTier = renewalTier;
+    isRenewalCheckout = true;
+  } else {
+    return NextResponse.json(
+      { error: "No application found. Submit an application before payment." },
+      { status: 409 }
+    );
+  }
+
+  if (!selectedTier) {
+    return NextResponse.json(
+      { error: "Pricing tier could not be determined for checkout." },
+      { status: 409 }
+    );
+  }
+
   const activeEnrollments = await countActiveEnrollments(membershipYear.id);
   if (activeEnrollments >= membershipYear.membershipCap) {
     return NextResponse.json(
@@ -112,7 +156,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const lateRenewalBlocked = await isRenewalBlockedByLatePolicy({ membershipYear });
+  const lateRenewalBlocked = isRenewalCheckout
+    ? await isRenewalBlockedByLatePolicy({ membershipYear })
+    : false;
   if (lateRenewalBlocked) {
     return NextResponse.json(
       {
@@ -146,8 +192,8 @@ export async function POST(request: NextRequest) {
     membershipYearId: membershipYear.id,
     membershipYear: membershipYear.year,
     enrollmentId: enrollment.id,
-    amountCents: application.assignedPricingTier.amountCents,
-    discountReason: application.assignedPricingTier.code,
+    amountCents: selectedTier.amountCents,
+    discountReason: selectedTier.code,
     successUrl,
     cancelUrl,
   });
@@ -163,7 +209,7 @@ export async function POST(request: NextRequest) {
   await prisma.payment.create({
     data: {
       provider: "STRIPE",
-      amountCents: application.assignedPricingTier.amountCents,
+      amountCents: selectedTier.amountCents,
       status: "CREATED",
       externalId: checkout.sessionId,
       memberId: member.id,

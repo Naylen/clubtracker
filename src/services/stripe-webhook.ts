@@ -7,7 +7,7 @@ type EventConstructor = (
   secret: string
 ) => Stripe.Event;
 
-type WebhookPrisma = Pick<typeof prisma, "payment" | "membershipEnrollment" | "$transaction">;
+type WebhookPrisma = Pick<typeof prisma, "payment" | "membershipEnrollment" | "member" | "$transaction">;
 
 export function verifyStripeEvent(input: {
   rawBody: string;
@@ -84,6 +84,11 @@ async function handleCheckoutSessionCompleted(
         },
       });
     }
+
+    await tx.member.update({
+      where: { id: payment.memberId },
+      data: { isActive: true },
+    });
   });
 }
 
