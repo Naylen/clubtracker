@@ -16,6 +16,9 @@ if [ -n "${DATABASE_URL:-}" ]; then
     sleep 2
   done
 
+  echo "[entrypoint] generating prisma client"
+  npx prisma generate
+
   echo "[entrypoint] running prisma migrate deploy"
   npx prisma migrate deploy
 

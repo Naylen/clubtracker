@@ -2,7 +2,7 @@ import { Prisma, type MembershipYear } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { logSetupIssueOnce, validateRuntimeEnvironment } from "@/lib/runtime-env";
-import { canPublicApply, getApplicationSignupDayGate } from "@/services/application-policy";
+import { explainApplicationsClosed, isApplicationsOpenNow } from "@/services/application-gating";
 import {
   countActiveEnrollments,
   DEFAULT_MEMBERSHIP_CAP,
@@ -94,26 +94,23 @@ export async function setApplicationWindow(input: {
 }
 
 export function isApplicationOpenNow(input: {
-  membershipYear: Pick<MembershipYear, "applicationEnabled">;
+  membershipYear: Pick<MembershipYear, "applicationEnabled" | "signupEnabled" | "signupDate" | "membershipCap">;
   window: ApplicationWindow;
+  activeEnrollments?: number;
   asOf?: Date;
 }): boolean {
-  if (!input.membershipYear.applicationEnabled) {
-    return false;
-  }
-
-  const now = input.asOf ?? new Date();
-  const opensAt = parseOptionalDate(input.window.opensAt);
-  const closesAt = parseOptionalDate(input.window.closesAt);
-
-  if (opensAt && now < opensAt) {
-    return false;
-  }
-  if (closesAt && now > closesAt) {
-    return false;
-  }
-
-  return true;
+  return isApplicationsOpenNow(
+    {
+      applicationEnabled: input.membershipYear.applicationEnabled,
+      applicationOpensAt: input.window.opensAt,
+      applicationClosesAt: input.window.closesAt,
+      signupEnabled: input.membershipYear.signupEnabled,
+      signupDate: input.membershipYear.signupDate,
+      membershipCap: input.membershipYear.membershipCap,
+      activeEnrollments: input.activeEnrollments,
+    },
+    input.asOf
+  );
 }
 
 export type CurrentYearOperationalState = {
@@ -233,11 +230,6 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
   }
 
   let window: ApplicationWindow = { opensAt: null, closesAt: null };
-  let signupGate = {
-    enforceSignupDayWindow: false,
-    startsAt: null,
-    endsAt: null,
-  };
   let latePolicy: Awaited<ReturnType<typeof getLateRenewalPolicy>> = {
     enabled: false,
     policyNotes: "",
@@ -248,10 +240,9 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
   let unpaidRenewals = 0;
 
   try {
-    [window, signupGate, latePolicy, activeEnrollments, activeMembers, pendingApplications, unpaidRenewals] =
+    [window, latePolicy, activeEnrollments, activeMembers, pendingApplications, unpaidRenewals] =
       await Promise.all([
         getApplicationWindow(year),
-        getApplicationSignupDayGate(year),
         getLateRenewalPolicy(),
         countActiveEnrollments(membershipYear.id),
         prisma.member.count({
@@ -286,18 +277,29 @@ export async function getCurrentYearOperationalState(): Promise<CurrentYearOpera
     throw error;
   }
 
-  const publicApplyDecision = canPublicApply({
-    membershipYear,
-    applicationWindow: window,
-    signupGate,
+  const applicationPublicOpen = isApplicationsOpenNow({
+    applicationEnabled: membershipYear.applicationEnabled,
+    applicationOpensAt: window.opensAt,
+    applicationClosesAt: window.closesAt,
+    signupEnabled: membershipYear.signupEnabled,
+    signupDate: membershipYear.signupDate,
+    membershipCap: membershipYear.membershipCap,
     activeEnrollments,
   });
-  const applicationPublicOpen = publicApplyDecision.allowed;
+  const closedReasons = explainApplicationsClosed({
+    applicationEnabled: membershipYear.applicationEnabled,
+    applicationOpensAt: window.opensAt,
+    applicationClosesAt: window.closesAt,
+    signupEnabled: membershipYear.signupEnabled,
+    signupDate: membershipYear.signupDate,
+    membershipCap: membershipYear.membershipCap,
+    activeEnrollments,
+  }).reasons;
   const capacityRemaining = Math.max(0, membershipYear.membershipCap - activeEnrollments);
 
   const alerts: string[] = [];
   if (!applicationPublicOpen) {
-    alerts.push(publicApplyDecision.message);
+    alerts.push(closedReasons[0] ?? "Applications are currently closed by the club.");
   }
   if (capacityRemaining === 0) {
     alerts.push("Membership capacity is full.");

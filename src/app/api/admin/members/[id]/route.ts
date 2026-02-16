@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { validateStructuredAddress } from "@/lib/address";
 import { validateDisciplineInterests } from "@/lib/discipline";
 import { secureDlNumber } from "@/lib/dl-security";
 import { isSeniorFromDob } from "@/lib/membership-dates";
@@ -33,7 +34,11 @@ export async function PATCH(
     email?: string;
     password?: string;
     phone?: string | null;
-    address?: string | null;
+    street1?: string | null;
+    street2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    zip?: string | null;
     dob?: string | null;
     isDisabledVeteran?: boolean;
     isActive?: boolean;
@@ -71,6 +76,26 @@ export async function PATCH(
 
   const dlNumberRaw = body.dlNumber?.trim();
   const secureDlFields = dlNumberRaw ? secureDlNumber(dlNumberRaw) : null;
+  const hasAddressPatch =
+    body.street1 !== undefined ||
+    body.street2 !== undefined ||
+    body.city !== undefined ||
+    body.state !== undefined ||
+    body.zip !== undefined;
+
+  const parsedAddress = hasAddressPatch
+    ? validateStructuredAddress({
+        street1: body.street1 ?? existing.street1,
+        street2: body.street2 ?? existing.street2,
+        city: body.city ?? existing.city,
+        state: body.state ?? existing.state,
+        zip: body.zip ?? existing.zip,
+      })
+    : null;
+
+  if (parsedAddress && parsedAddress.errors.length > 0) {
+    return NextResponse.json({ error: parsedAddress.errors[0] }, { status: 400 });
+  }
 
   const member = await prisma.member.update({
     where: { id: params.id },
@@ -78,7 +103,15 @@ export async function PATCH(
       ...(body.name !== undefined ? { name: body.name.trim() } : {}),
       ...(body.email !== undefined ? { email: body.email.trim().toLowerCase() } : {}),
       ...(body.phone !== undefined ? { phone: body.phone?.trim() || null } : {}),
-      ...(body.address !== undefined ? { address: body.address?.trim() || null } : {}),
+      ...(parsedAddress
+        ? {
+            street1: parsedAddress.value.street1,
+            street2: parsedAddress.value.street2,
+            city: parsedAddress.value.city,
+            state: parsedAddress.value.state,
+            zip: parsedAddress.value.zip,
+          }
+        : {}),
       ...(Object.prototype.hasOwnProperty.call(body, "dob") ? { dob } : {}),
       ...(body.isDisabledVeteran !== undefined
         ? { isDisabledVeteran: body.isDisabledVeteran }

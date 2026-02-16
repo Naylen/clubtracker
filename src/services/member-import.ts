@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import type { EnrollmentStatus, Role } from "@prisma/client";
+import { validateStructuredAddress } from "@/lib/address";
 import { isSeniorFromDob } from "@/lib/membership-dates";
 import { hashPassword } from "@/lib/password";
 
@@ -28,7 +29,11 @@ export type PreparedMemberImportRow = {
   email: string | null;
   name: string | null;
   phone: string | null;
-  address: string | null;
+  street1: string | null;
+  street2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
   dob: Date | null;
   isDisabledVeteran: boolean;
   isActive: boolean;
@@ -57,7 +62,11 @@ type ParsedStatus = "ACTIVE" | "INACTIVE" | "PENDING";
 type MemberForImportUpdate = {
   name: string;
   phone: string | null;
-  address: string | null;
+  street1: string;
+  street2: string | null;
+  city: string;
+  state: string;
+  zip: string;
   dob: Date | null;
   isDisabledVeteran: boolean;
   isSenior: boolean;
@@ -71,7 +80,11 @@ export type MemberImportRepository = {
     email: string;
     passwordHash: string;
     phone: string | null;
-    address: string | null;
+    street1: string;
+    street2: string | null;
+    city: string;
+    state: string;
+    zip: string;
     dob: Date | null;
     isDisabledVeteran: boolean;
     isSenior: boolean;
@@ -118,6 +131,24 @@ const HEADER_ALIASES: Record<string, string[]> = {
   lastName: ["lastname", "last_name", "last", "lname", "surname", "familyname"],
   name: ["name", "fullname", "full_name", "membername"],
   phone: ["phone", "phonenumber", "phone_number", "mobile", "telephone"],
+  street1: [
+    "street1",
+    "street_1",
+    "address",
+    "address1",
+    "street",
+    "streetaddress",
+  ],
+  street2: [
+    "street2",
+    "street_2",
+    "address2",
+    "apt",
+    "suite",
+    "unit",
+    "aptsuite",
+  ],
+  // Legacy single-address column remains accepted for backward compatibility.
   address: ["address", "address1", "street", "streetaddress"],
   city: ["city", "town"],
   state: ["state", "province", "region"],
@@ -309,20 +340,6 @@ function combineName(firstName: string, lastName: string, fullName: string): str
   return combined;
 }
 
-function combineAddress(address: string, city: string, state: string, zip: string): string | null {
-  const cityStateZip = [city, state, zip].filter(Boolean).join(" ").trim();
-  if (address && cityStateZip) {
-    return `${address}, ${cityStateZip}`;
-  }
-  if (address) {
-    return address;
-  }
-  if (cityStateZip) {
-    return cityStateZip;
-  }
-  return null;
-}
-
 function resolveIsActive(
   status: ParsedStatus | null,
   options: MemberImportOptions
@@ -353,9 +370,11 @@ export function prepareMemberCsvImport(
     const lastName = getAliasedValue(row, "lastName");
     const fullName = getAliasedValue(row, "name");
     const phone = getAliasedValue(row, "phone") || null;
-    const address = getAliasedValue(row, "address");
+    const legacyAddress = getAliasedValue(row, "address");
+    const street1Raw = getAliasedValue(row, "street1") || legacyAddress;
+    const street2Raw = getAliasedValue(row, "street2");
     const city = getAliasedValue(row, "city");
-    const state = getAliasedValue(row, "state");
+    const state = getAliasedValue(row, "state").toUpperCase();
     const zip = getAliasedValue(row, "zip");
     const dobRaw = getAliasedValue(row, "dateOfBirth");
     const veteranRaw = getAliasedValue(row, "isDisabledVeteran");
@@ -371,6 +390,9 @@ export function prepareMemberCsvImport(
     const name = combineName(firstName, lastName, fullName);
     if (!name) {
       rowErrors.push("name is required (name or firstName/lastName)");
+    }
+    if (!street1Raw.trim()) {
+      rowErrors.push("street1 is required (street1 or legacy address)");
     }
 
     const dobParsed = parseDateOfBirth(dobRaw);
@@ -392,13 +414,29 @@ export function prepareMemberCsvImport(
       rowErrors.push("CSV role import cannot assign ADMIN");
     }
 
+    const parsedAddress = validateStructuredAddress(
+      {
+        street1: street1Raw,
+        street2: street2Raw,
+        city,
+        state,
+        zip,
+      },
+      { requireCoreFields: false }
+    );
+    rowErrors.push(...parsedAddress.errors);
+
     const preparedRow: PreparedMemberImportRow = {
       rowNumber,
       raw: row,
       email: emailRaw || null,
       name: name || null,
       phone,
-      address: combineAddress(address, city, state, zip),
+      street1: parsedAddress.value.street1 || null,
+      street2: parsedAddress.value.street2,
+      city: parsedAddress.value.city || null,
+      state: parsedAddress.value.state || null,
+      zip: parsedAddress.value.zip || null,
       dob: dobParsed.value,
       isDisabledVeteran: veteranParsed.value ?? false,
       isActive: resolveIsActive(statusParsed.value, options),
@@ -427,7 +465,11 @@ function buildMemberUpdateInput(row: PreparedMemberImportRow): MemberForImportUp
   return {
     name: row.name,
     phone: row.phone,
-    address: row.address,
+    street1: row.street1 ?? "",
+    street2: row.street2,
+    city: row.city ?? "",
+    state: row.state ?? "",
+    zip: row.zip ?? "",
     dob: row.dob,
     isDisabledVeteran: row.isDisabledVeteran,
     isSenior: isSeniorFromDob(row.dob),

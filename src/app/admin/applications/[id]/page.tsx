@@ -3,11 +3,16 @@ import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { determineSignupDay, isSeniorOnDate } from "@/lib/membership-dates";
+import { formatAddress } from "@/lib/address";
+import { determineSignupDay } from "@/lib/membership-dates";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
+import {
+  ApplicationApprovalError,
+  approveMembershipApplication,
+  denyMembershipApplication,
+} from "@/services/application-approval";
 import { deriveApplicationReviewState } from "@/services/application-review";
-import { createAuditLog } from "@/services/audit";
 
 type SearchParams = {
   error?: string;
@@ -110,69 +115,23 @@ export default async function ApplicationDetailPage({
       redirect(`/admin/applications/${params.id}?error=Pricing%20tier%20selection%20is%20required.`);
     }
 
-    const appRecord = await prisma.membershipApplication.findUnique({
-      where: { id: applicationId },
-      include: {
-        membershipYear: true,
-      },
-    });
-
-    if (!appRecord) {
-      redirect(`/admin/applications/${params.id}?error=Application%20not%20found.`);
+    try {
+      await approveMembershipApplication({
+        applicationId,
+        reviewer: {
+          memberId: reviewer.memberId,
+          email: reviewer.email,
+        },
+        assignedPricingTierId,
+        disabledVeteranApproved,
+        confirmSeniorOverride,
+      });
+    } catch (error) {
+      if (error instanceof ApplicationApprovalError) {
+        redirect(`/admin/applications/${params.id}?error=${encodeURIComponent(error.message)}`);
+      }
+      throw error;
     }
-
-    const tier = await prisma.pricingTier.findUnique({
-      where: { id: assignedPricingTierId },
-    });
-    if (!tier || !tier.isActive || tier.membershipYearId !== appRecord.membershipYearId) {
-      redirect(`/admin/applications/${params.id}?error=Invalid%20pricing%20tier%20selected.`);
-    }
-
-    const computedSignupDay = determineSignupDay({
-      year: appRecord.membershipYear.year,
-      signupDate: appRecord.membershipYear.signupDate,
-    });
-    const seniorAuto = isSeniorOnDate(appRecord.applicantDob, computedSignupDay);
-    const isSeniorOverride = seniorAuto && tier.code !== "SENIOR";
-
-    if (isSeniorOverride && !confirmSeniorOverride) {
-      redirect(
-        `/admin/applications/${params.id}?error=Senior%20auto-pricing%20override%20requires%20confirmation.`
-      );
-    }
-
-    const disabledVetApprovedValue = appRecord.requestedDisabledVeteranDiscount
-      ? disabledVeteranApproved
-      : false;
-
-    await prisma.membershipApplication.update({
-      where: { id: appRecord.id },
-      data: {
-        status: "APPROVED",
-        assignedPricingTierId: tier.id,
-        reviewedAt: new Date(),
-        reviewedByMemberId: reviewer.memberId,
-        denialReason: null,
-        disabledVeteranApproved: disabledVetApprovedValue,
-        seniorAutoApplied: seniorAuto,
-      },
-    });
-
-    await createAuditLog({
-      action: "APPLICATION_APPROVED",
-      actorMemberId: reviewer.memberId,
-      targetMemberId: appRecord.createdMemberId,
-      meta: {
-        membershipApplicationId: appRecord.id,
-        membershipYearId: appRecord.membershipYearId,
-        applicantEmail: appRecord.applicantEmail,
-        assignedPricingTierId: tier.id,
-        assignedPricingTierCode: tier.code,
-        disabledVeteranApproved: disabledVetApprovedValue,
-        seniorAutoApplied: seniorAuto,
-        seniorOverrideApplied: isSeniorOverride,
-      },
-    });
 
     revalidatePath("/admin/applications");
     revalidatePath(`/admin/applications/${params.id}`);
@@ -192,41 +151,21 @@ export default async function ApplicationDetailPage({
       redirect(`/admin/applications/${params.id}?error=Denial%20reason%20is%20required.`);
     }
 
-    const appRecord = await prisma.membershipApplication.findUnique({
-      where: { id: applicationId },
-      select: {
-        id: true,
-        createdMemberId: true,
-        membershipYearId: true,
-      },
-    });
-
-    if (!appRecord) {
-      redirect(`/admin/applications/${params.id}?error=Application%20not%20found.`);
+    try {
+      await denyMembershipApplication({
+        applicationId,
+        reviewer: {
+          memberId: reviewer.memberId,
+          email: reviewer.email,
+        },
+        denialReason,
+      });
+    } catch (error) {
+      if (error instanceof ApplicationApprovalError) {
+        redirect(`/admin/applications/${params.id}?error=${encodeURIComponent(error.message)}`);
+      }
+      throw error;
     }
-
-    await prisma.membershipApplication.update({
-      where: { id: appRecord.id },
-      data: {
-        status: "DENIED",
-        denialReason,
-        reviewedAt: new Date(),
-        reviewedByMemberId: reviewer.memberId,
-        assignedPricingTierId: null,
-        disabledVeteranApproved: false,
-      },
-    });
-
-    await createAuditLog({
-      action: "APPLICATION_DENIED",
-      actorMemberId: reviewer.memberId,
-      targetMemberId: appRecord.createdMemberId,
-      meta: {
-        membershipApplicationId: appRecord.id,
-        membershipYearId: appRecord.membershipYearId,
-        denialReason,
-      },
-    });
 
     revalidatePath("/admin/applications");
     revalidatePath(`/admin/applications/${params.id}`);
@@ -283,7 +222,14 @@ export default async function ApplicationDetailPage({
               <span className="font-medium">Phone:</span> {application.applicantPhone ?? "Not provided"}
             </p>
             <p>
-              <span className="font-medium">Address:</span> {application.applicantAddress ?? "Not provided"}
+              <span className="font-medium">Address:</span>{" "}
+              {formatAddress({
+                street1: application.applicantStreet1,
+                street2: application.applicantStreet2,
+                city: application.applicantCity,
+                state: application.applicantState,
+                zip: application.applicantZip,
+              }) || "Not provided"}
             </p>
             <p>
               <span className="font-medium">DOB:</span>{" "}
@@ -396,7 +342,9 @@ export default async function ApplicationDetailPage({
         <section className="rounded-xl border bg-white p-5 text-sm shadow-sm">
           <p>
             Last reviewed on {application.reviewedAt.toLocaleString()}
-            {application.reviewedByMember
+            {application.reviewedByEmail
+              ? ` by ${application.reviewedByEmail}`
+              : application.reviewedByMember
               ? ` by ${application.reviewedByMember.name} (${application.reviewedByMember.email})`
               : ""}
             .

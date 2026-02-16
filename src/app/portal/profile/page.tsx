@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { validateStructuredAddress } from "@/lib/address";
 import { MEMBER_DISCIPLINE_OPTIONS, parseDisciplineInterests } from "@/lib/discipline";
 import { requireCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -62,7 +63,11 @@ export default async function MemberProfilePage({
     const authUser = await requireCurrentUser("/portal/profile");
     const name = String(formData.get("name") ?? "").trim();
     const phone = String(formData.get("phone") ?? "").trim() || null;
-    const address = String(formData.get("address") ?? "").trim() || null;
+    const street1 = String(formData.get("street1") ?? "").trim();
+    const street2 = String(formData.get("street2") ?? "").trim() || null;
+    const city = String(formData.get("city") ?? "").trim();
+    const state = String(formData.get("state") ?? "").trim().toUpperCase();
+    const zip = String(formData.get("zip") ?? "").trim();
     const dob = parseDateInput(formData.get("dob"));
     const emergencyContactName = String(formData.get("emergencyContactName") ?? "").trim() || null;
     const emergencyContactRelationship =
@@ -73,13 +78,27 @@ export default async function MemberProfilePage({
     if (!name) {
       redirect("/portal/profile?error=Name%20is%20required");
     }
+    const parsedAddress = validateStructuredAddress({
+      street1,
+      street2,
+      city,
+      state,
+      zip,
+    });
+    if (parsedAddress.errors.length > 0) {
+      redirect(`/portal/profile?error=${encodeURIComponent(parsedAddress.errors[0])}`);
+    }
 
     await prisma.member.update({
       where: { id: authUser.memberId },
       data: {
         name,
         phone,
-        address,
+        street1: parsedAddress.value.street1,
+        street2: parsedAddress.value.street2,
+        city: parsedAddress.value.city,
+        state: parsedAddress.value.state,
+        zip: parsedAddress.value.zip,
         dob,
         emergencyContactName,
         emergencyContactRelationship,
@@ -137,8 +156,30 @@ export default async function MemberProfilePage({
             <input className="mt-1 w-full rounded border p-2" defaultValue={member.phone ?? ""} name="phone" />
           </label>
           <label className="text-sm font-medium">
-            Address
-            <input className="mt-1 w-full rounded border p-2" defaultValue={member.address ?? ""} name="address" />
+            Street Address
+            <input className="mt-1 w-full rounded border p-2" defaultValue={member.street1} name="street1" required />
+          </label>
+          <label className="text-sm font-medium">
+            Apt / Suite (optional)
+            <input className="mt-1 w-full rounded border p-2" defaultValue={member.street2 ?? ""} name="street2" />
+          </label>
+          <label className="text-sm font-medium">
+            City
+            <input className="mt-1 w-full rounded border p-2" defaultValue={member.city} name="city" required />
+          </label>
+          <label className="text-sm font-medium">
+            State
+            <input
+              className="mt-1 w-full rounded border p-2 uppercase"
+              defaultValue={member.state}
+              maxLength={2}
+              name="state"
+              required
+            />
+          </label>
+          <label className="text-sm font-medium">
+            ZIP
+            <input className="mt-1 w-full rounded border p-2" defaultValue={member.zip} name="zip" required />
           </label>
         </section>
 

@@ -1,3 +1,4 @@
+import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -90,8 +91,9 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
 
   if (!membershipYear || !applyState.decision.allowed) {
     const signupDayText = formatDateTime(applyState.decision.signupDay);
-    const gateStartText = formatDateTime(applyState.decision.gateStartsAt);
-    const gateEndText = formatDateTime(applyState.decision.gateEndsAt);
+    const detailedReasons = applyState.decision.reasons.filter(
+      (reason) => reason !== "Applications are currently closed by the club."
+    );
 
     return (
       <main className="mx-auto max-w-3xl space-y-6 p-6">
@@ -106,18 +108,17 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
         ) : null}
 
         <section className="rounded-xl border bg-white p-6 shadow-sm">
-          <p className="text-sm text-gray-700">{applyState.decision.message}</p>
+          <p className="text-sm text-gray-700">Applications are currently closed by the club.</p>
+          {detailedReasons.length > 0 ? (
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-700">
+              {detailedReasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          ) : null}
           {signupDayText ? (
             <p className="mt-3 text-sm text-gray-700">
               Signup day: <span className="font-medium">{signupDayText}</span>
-            </p>
-          ) : null}
-          {gateStartText || gateEndText ? (
-            <p className="mt-2 text-sm text-gray-700">
-              Signup day gate window:{" "}
-              <span className="font-medium">
-                {gateStartText ?? "Not set"} - {gateEndText ?? "Not set"}
-              </span>
             </p>
           ) : null}
         </section>
@@ -200,7 +201,11 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
     const firstName = String(formData.get("firstName") ?? "").trim();
     const lastName = String(formData.get("lastName") ?? "").trim();
     const phone = String(formData.get("phone") ?? "").trim() || null;
-    const address = String(formData.get("address") ?? "").trim() || null;
+    const street1 = String(formData.get("street1") ?? "").trim();
+    const street2 = String(formData.get("street2") ?? "").trim() || null;
+    const city = String(formData.get("city") ?? "").trim();
+    const state = String(formData.get("state") ?? "").trim().toUpperCase();
+    const zip = String(formData.get("zip") ?? "").trim();
     const dob = parseDateInput(String(formData.get("dob") ?? ""));
     const emergencyContactName = String(formData.get("emergencyContactName") ?? "").trim() || null;
     const emergencyContactRelationship =
@@ -210,8 +215,20 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
     const requestedDisabledVeteranDiscount =
       formData.get("requestedDisabledVeteranDiscount") === "on";
 
-    if (!email || !password || !firstName || !lastName || !dob) {
-      redirect("/apply?error=Email%2C%20password%2C%20name%2C%20and%20DOB%20are%20required.");
+    if (
+      !email ||
+      !password ||
+      !firstName ||
+      !lastName ||
+      !dob ||
+      !street1 ||
+      !city ||
+      !state ||
+      !zip
+    ) {
+      redirect(
+        "/apply?error=Email%2C%20password%2C%20name%2C%20DOB%2C%20and%20address%20fields%20are%20required."
+      );
     }
 
     try {
@@ -222,7 +239,11 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
         firstName,
         lastName,
         phone,
-        address,
+        street1,
+        street2,
+        city,
+        state,
+        zip,
         dob,
         emergencyContactName,
         emergencyContactRelationship,
@@ -246,6 +267,9 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
         }
         if (error.code === "ACCOUNT_EXISTS") {
           redirect("/login?next=%2Fapply&error=Account%20already%20exists.%20Please%20sign%20in.");
+        }
+        if (error.code === "INVALID_APPLICATION_INPUT") {
+          redirect(`/apply?error=${encodeURIComponent(error.message)}`);
         }
       }
       throw error;
@@ -277,7 +301,11 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
     const firstName = String(formData.get("firstName") ?? "").trim();
     const lastName = String(formData.get("lastName") ?? "").trim();
     const phone = String(formData.get("phone") ?? "").trim() || null;
-    const address = String(formData.get("address") ?? "").trim() || null;
+    const street1 = String(formData.get("street1") ?? "").trim();
+    const street2 = String(formData.get("street2") ?? "").trim() || null;
+    const city = String(formData.get("city") ?? "").trim();
+    const state = String(formData.get("state") ?? "").trim().toUpperCase();
+    const zip = String(formData.get("zip") ?? "").trim();
     const dob = parseDateInput(String(formData.get("dob") ?? ""));
     const emergencyContactName = String(formData.get("emergencyContactName") ?? "").trim() || null;
     const emergencyContactRelationship =
@@ -287,8 +315,8 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
     const requestedDisabledVeteranDiscount =
       formData.get("requestedDisabledVeteranDiscount") === "on";
 
-    if (!firstName || !lastName || !dob) {
-      redirect("/apply?error=Name%20and%20DOB%20are%20required.");
+    if (!firstName || !lastName || !dob || !street1 || !city || !state || !zip) {
+      redirect("/apply?error=Name%2C%20DOB%2C%20and%20address%20fields%20are%20required.");
     }
 
     try {
@@ -299,7 +327,11 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
         firstName,
         lastName,
         phone,
-        address,
+        street1,
+        street2,
+        city,
+        state,
+        zip,
         dob,
         emergencyContactName,
         emergencyContactRelationship,
@@ -314,6 +346,9 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
         }
         if (error.code === "ACCOUNT_NOT_FOUND") {
           redirect("/login?next=%2Fapply&error=Account%20not%20found.");
+        }
+        if (error.code === "INVALID_APPLICATION_INPUT") {
+          redirect(`/apply?error=${encodeURIComponent(error.message)}`);
         }
       }
       throw error;
@@ -456,8 +491,49 @@ export default async function ApplyPage({ searchParams }: { searchParams: Search
               />
             </label>
             <label className="text-sm font-medium sm:col-span-2">
-              Address
-              <input className="mt-1 w-full rounded border p-2" defaultValue={member?.address ?? ""} name="address" />
+              Street Address
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={application?.applicantStreet1 ?? member?.street1 ?? ""}
+                name="street1"
+                required
+              />
+            </label>
+            <label className="text-sm font-medium sm:col-span-2">
+              Apt / Suite (optional)
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={application?.applicantStreet2 ?? member?.street2 ?? ""}
+                name="street2"
+              />
+            </label>
+            <label className="text-sm font-medium">
+              City
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={application?.applicantCity ?? member?.city ?? ""}
+                name="city"
+                required
+              />
+            </label>
+            <label className="text-sm font-medium">
+              State
+              <input
+                className="mt-1 w-full rounded border p-2 uppercase"
+                defaultValue={application?.applicantState ?? member?.state ?? ""}
+                maxLength={2}
+                name="state"
+                required
+              />
+            </label>
+            <label className="text-sm font-medium sm:col-span-2">
+              ZIP
+              <input
+                className="mt-1 w-full rounded border p-2"
+                defaultValue={application?.applicantZip ?? member?.zip ?? ""}
+                name="zip"
+                required
+              />
             </label>
           </div>
 

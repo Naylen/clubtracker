@@ -56,8 +56,16 @@ describe("application flow", () => {
       firstName: "New",
       lastName: "Applicant",
       phone: "555-1234",
-      address: "123 Main",
+      street1: "123 Main",
+      street2: null,
+      city: "Mount Sterling",
+      state: "KY",
+      zip: "40353",
       dob: new Date("1990-01-01T00:00:00.000Z"),
+      emergencyContactName: null,
+      emergencyContactRelationship: null,
+      emergencyContactPhone: null,
+      disciplineInterests: [],
       requestedDisabledVeteranDiscount: false,
     });
 
@@ -67,6 +75,10 @@ describe("application flow", () => {
           email: "new@applicant.com",
           role: "MEMBER",
           status: "PENDING",
+          street1: "123 Main",
+          city: "Mount Sterling",
+          state: "KY",
+          zip: "40353",
         }),
       })
     );
@@ -75,6 +87,10 @@ describe("application flow", () => {
         create: expect.objectContaining({
           status: "SUBMITTED",
           applicantEmail: "new@applicant.com",
+          applicantStreet1: "123 Main",
+          applicantCity: "Mount Sterling",
+          applicantState: "KY",
+          applicantZip: "40353",
         }),
       })
     );

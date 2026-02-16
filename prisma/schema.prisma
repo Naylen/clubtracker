@@ -59,7 +59,11 @@ model Member {
   email             String                 @unique
   passwordHash      String
   phone             String?
-  address           String?
+  street1           String                 @default("")
+  street2           String?
+  city              String                 @default("")
+  state             String                 @default("")
+  zip               String                 @default("")
   dob               DateTime?
   isDisabledVeteran Boolean                @default(false)
   isSenior          Boolean                @default(false)
@@ -151,7 +155,11 @@ model MembershipApplication {
   applicantFirstName             String
   applicantLastName              String
   applicantPhone                 String?
-  applicantAddress               String?
+  applicantStreet1               String            @default("")
+  applicantStreet2               String?
+  applicantCity                  String            @default("")
+  applicantState                 String            @default("")
+  applicantZip                   String            @default("")
   applicantDob                   DateTime?
   status                         ApplicationStatus @default(DRAFT)
   requestedDisabledVeteranDiscount Boolean         @default(false)
@@ -162,6 +170,7 @@ model MembershipApplication {
   submittedAt                    DateTime?
   reviewedAt                     DateTime?
   reviewedByMemberId             String?
+  reviewedByEmail                String?
   denialReason                   String?
   createdAt                      DateTime          @default(now())
   updatedAt                      DateTime          @updatedAt

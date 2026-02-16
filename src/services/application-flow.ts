@@ -1,21 +1,28 @@
 import { ApplicationStatus, MemberStatus, type MembershipYear } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { validateStructuredAddress } from "@/lib/address";
 import { parseDisciplineInterests } from "@/lib/discipline";
 import { getCurrentYearInNewYork } from "@/lib/membership-dates";
 import { hashPassword } from "@/lib/password";
+import { explainApplicationsClosed, isApplicationsOpenNow } from "@/services/application-gating";
 import { countActiveEnrollments } from "@/services/membership";
-import {
-  canPublicApply,
-  getApplicationSignupDayGate,
-  type PublicApplyDecision,
-} from "@/services/application-policy";
 import { getApplicationWindow } from "@/services/operations-state";
 
 export class ApplicationFlowError extends Error {
-  code: "APPLICATIONS_CLOSED" | "ACTIVE_MEMBER_EXISTS" | "ACCOUNT_EXISTS" | "ACCOUNT_NOT_FOUND";
+  code:
+    | "APPLICATIONS_CLOSED"
+    | "ACTIVE_MEMBER_EXISTS"
+    | "ACCOUNT_EXISTS"
+    | "ACCOUNT_NOT_FOUND"
+    | "INVALID_APPLICATION_INPUT";
 
   constructor(
-    code: "APPLICATIONS_CLOSED" | "ACTIVE_MEMBER_EXISTS" | "ACCOUNT_EXISTS" | "ACCOUNT_NOT_FOUND",
+    code:
+      | "APPLICATIONS_CLOSED"
+      | "ACTIVE_MEMBER_EXISTS"
+      | "ACCOUNT_EXISTS"
+      | "ACCOUNT_NOT_FOUND"
+      | "INVALID_APPLICATION_INPUT",
     message: string
   ) {
     super(message);
@@ -25,7 +32,12 @@ export class ApplicationFlowError extends Error {
 
 export type CurrentPublicApplicationState = {
   membershipYear: MembershipYear | null;
-  decision: PublicApplyDecision;
+  decision: {
+    allowed: boolean;
+    message: string;
+    reasons: string[];
+    signupDay: Date | null;
+  };
 };
 
 type BaseInput = {
@@ -34,7 +46,11 @@ type BaseInput = {
   firstName: string;
   lastName: string;
   phone: string | null;
-  address: string | null;
+  street1: string;
+  street2: string | null;
+  city: string;
+  state: string;
+  zip: string;
   dob: Date;
   emergencyContactName: string | null;
   emergencyContactRelationship: string | null;
@@ -67,23 +83,57 @@ export async function getCurrentPublicApplicationState(
     where: { year: currentYear },
   });
 
-  const [applicationWindow, signupGate, activeEnrollments] = await Promise.all([
+  const [applicationWindow, activeEnrollments] = await Promise.all([
     getApplicationWindow(currentYear),
-    getApplicationSignupDayGate(currentYear),
     membershipYear ? countActiveEnrollments(membershipYear.id) : Promise.resolve(0),
   ]);
 
-  const decision = canPublicApply({
-    membershipYear,
-    applicationWindow,
-    signupGate,
-    activeEnrollments,
-    asOf,
-  });
+  if (!membershipYear) {
+    return {
+      membershipYear: null,
+      decision: {
+        allowed: false,
+        reasons: ["Applications are currently closed by the club."],
+        message: "Applications are currently closed by the club.",
+        signupDay: null,
+      },
+    };
+  }
+
+  const reasons = explainApplicationsClosed(
+    {
+      applicationEnabled: membershipYear.applicationEnabled,
+      applicationOpensAt: applicationWindow.opensAt,
+      applicationClosesAt: applicationWindow.closesAt,
+      // Signup day is informational unless a dedicated gate setting is added.
+      signupEnabled: false,
+      signupDate: null,
+      membershipCap: membershipYear.membershipCap,
+      activeEnrollments,
+    },
+    asOf
+  ).reasons;
+  const allowed = isApplicationsOpenNow(
+    {
+      applicationEnabled: membershipYear.applicationEnabled,
+      applicationOpensAt: applicationWindow.opensAt,
+      applicationClosesAt: applicationWindow.closesAt,
+      signupEnabled: false,
+      signupDate: null,
+      membershipCap: membershipYear.membershipCap,
+      activeEnrollments,
+    },
+    asOf
+  );
 
   return {
     membershipYear,
-    decision,
+    decision: {
+      allowed,
+      reasons,
+      message: reasons[0] ?? "Applications are open.",
+      signupDay: membershipYear.signupDate,
+    },
   };
 }
 
@@ -111,6 +161,17 @@ async function ensureMemberCanApply(input: { memberId: string; email: string; st
 }
 
 export async function createApplicantAccountAndSubmit(input: NewApplicantInput) {
+  const validatedAddress = validateStructuredAddress({
+    street1: input.street1,
+    street2: input.street2,
+    city: input.city,
+    state: input.state,
+    zip: input.zip,
+  });
+  if (validatedAddress.errors.length > 0) {
+    throw new ApplicationFlowError("INVALID_APPLICATION_INPUT", validatedAddress.errors[0]);
+  }
+
   const email = input.email.trim().toLowerCase();
   const existingMember = await prisma.member.findUnique({
     where: { email },
@@ -131,7 +192,11 @@ export async function createApplicantAccountAndSubmit(input: NewApplicantInput) 
       email,
       passwordHash: hashPassword(input.password),
       phone: input.phone,
-      address: input.address,
+      street1: validatedAddress.value.street1,
+      street2: validatedAddress.value.street2,
+      city: validatedAddress.value.city,
+      state: validatedAddress.value.state,
+      zip: validatedAddress.value.zip,
       dob: input.dob,
       emergencyContactName: input.emergencyContactName,
       emergencyContactRelationship: input.emergencyContactRelationship,
@@ -154,7 +219,11 @@ export async function createApplicantAccountAndSubmit(input: NewApplicantInput) 
       applicantFirstName: input.firstName,
       applicantLastName: input.lastName,
       applicantPhone: input.phone,
-      applicantAddress: input.address,
+      applicantStreet1: validatedAddress.value.street1,
+      applicantStreet2: validatedAddress.value.street2,
+      applicantCity: validatedAddress.value.city,
+      applicantState: validatedAddress.value.state,
+      applicantZip: validatedAddress.value.zip,
       applicantDob: input.dob,
       requestedDisabledVeteranDiscount: input.requestedDisabledVeteranDiscount,
       disabledVeteranApproved: null,
@@ -163,6 +232,7 @@ export async function createApplicantAccountAndSubmit(input: NewApplicantInput) 
       submittedAt: new Date(),
       reviewedAt: null,
       reviewedByMemberId: null,
+      reviewedByEmail: null,
       denialReason: null,
       createdMemberId: createdMember.id,
     },
@@ -172,7 +242,11 @@ export async function createApplicantAccountAndSubmit(input: NewApplicantInput) 
       applicantFirstName: input.firstName,
       applicantLastName: input.lastName,
       applicantPhone: input.phone,
-      applicantAddress: input.address,
+      applicantStreet1: validatedAddress.value.street1,
+      applicantStreet2: validatedAddress.value.street2,
+      applicantCity: validatedAddress.value.city,
+      applicantState: validatedAddress.value.state,
+      applicantZip: validatedAddress.value.zip,
       applicantDob: input.dob,
       requestedDisabledVeteranDiscount: input.requestedDisabledVeteranDiscount,
       status: ApplicationStatus.SUBMITTED,
@@ -185,6 +259,17 @@ export async function createApplicantAccountAndSubmit(input: NewApplicantInput) 
 }
 
 export async function submitApplicationForExistingAccount(input: BaseInput & { memberId: string }) {
+  const validatedAddress = validateStructuredAddress({
+    street1: input.street1,
+    street2: input.street2,
+    city: input.city,
+    state: input.state,
+    zip: input.zip,
+  });
+  if (validatedAddress.errors.length > 0) {
+    throw new ApplicationFlowError("INVALID_APPLICATION_INPUT", validatedAddress.errors[0]);
+  }
+
   const account = await prisma.member.findUnique({
     where: { id: input.memberId },
   });
@@ -204,7 +289,11 @@ export async function submitApplicationForExistingAccount(input: BaseInput & { m
     data: {
       name: combineName(input.firstName, input.lastName),
       phone: input.phone,
-      address: input.address,
+      street1: validatedAddress.value.street1,
+      street2: validatedAddress.value.street2,
+      city: validatedAddress.value.city,
+      state: validatedAddress.value.state,
+      zip: validatedAddress.value.zip,
       dob: input.dob,
       emergencyContactName: input.emergencyContactName,
       emergencyContactRelationship: input.emergencyContactRelationship,
@@ -226,7 +315,11 @@ export async function submitApplicationForExistingAccount(input: BaseInput & { m
       applicantFirstName: input.firstName,
       applicantLastName: input.lastName,
       applicantPhone: input.phone,
-      applicantAddress: input.address,
+      applicantStreet1: validatedAddress.value.street1,
+      applicantStreet2: validatedAddress.value.street2,
+      applicantCity: validatedAddress.value.city,
+      applicantState: validatedAddress.value.state,
+      applicantZip: validatedAddress.value.zip,
       applicantDob: input.dob,
       requestedDisabledVeteranDiscount: input.requestedDisabledVeteranDiscount,
       disabledVeteranApproved: null,
@@ -235,6 +328,7 @@ export async function submitApplicationForExistingAccount(input: BaseInput & { m
       submittedAt: new Date(),
       reviewedAt: null,
       reviewedByMemberId: null,
+      reviewedByEmail: null,
       denialReason: null,
       createdMemberId: account.id,
     },
@@ -244,7 +338,11 @@ export async function submitApplicationForExistingAccount(input: BaseInput & { m
       applicantFirstName: input.firstName,
       applicantLastName: input.lastName,
       applicantPhone: input.phone,
-      applicantAddress: input.address,
+      applicantStreet1: validatedAddress.value.street1,
+      applicantStreet2: validatedAddress.value.street2,
+      applicantCity: validatedAddress.value.city,
+      applicantState: validatedAddress.value.state,
+      applicantZip: validatedAddress.value.zip,
       applicantDob: input.dob,
       requestedDisabledVeteranDiscount: input.requestedDisabledVeteranDiscount,
       status: ApplicationStatus.SUBMITTED,

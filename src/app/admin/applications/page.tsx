@@ -10,7 +10,7 @@ import {
 } from "@/lib/membership-dates";
 import { PageShell } from "@/components/ui/page-shell";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { canPublicApply, getApplicationSignupDayGate } from "@/services/application-policy";
+import { explainApplicationsClosed, isApplicationsOpenNow } from "@/services/application-gating";
 import { getApplicationWindow } from "@/services/operations-state";
 
 type SearchParams = {
@@ -66,7 +66,14 @@ export default async function AdminApplicationsPage({
 
   const membershipYear = await prisma.membershipYear.findUnique({
     where: { year: selectedYear },
-    select: { id: true, year: true, signupDate: true, applicationEnabled: true, membershipCap: true },
+    select: {
+      id: true,
+      year: true,
+      signupDate: true,
+      signupEnabled: true,
+      applicationEnabled: true,
+      membershipCap: true,
+    },
   });
 
   const applications = membershipYear
@@ -98,10 +105,9 @@ export default async function AdminApplicationsPage({
   const signupDay = membershipYear
     ? determineSignupDay({ year: membershipYear.year, signupDate: membershipYear.signupDate })
     : null;
-  const [applicationWindow, signupDayGate, activeEnrollments] = membershipYear
+  const [applicationWindow, activeEnrollments] = membershipYear
     ? await Promise.all([
         getApplicationWindow(membershipYear.year),
-        getApplicationSignupDayGate(membershipYear.year),
         prisma.membershipEnrollment.count({
           where: {
             membershipYearId: membershipYear.id,
@@ -111,16 +117,30 @@ export default async function AdminApplicationsPage({
       ])
     : [
         { opensAt: null, closesAt: null },
-        { enforceSignupDayWindow: false, startsAt: null, endsAt: null },
         0,
       ];
-  const applicationsDecision = canPublicApply({
-    membershipYear,
-    applicationWindow,
-    signupGate: signupDayGate,
-    activeEnrollments,
-  });
-  const applicationsOpen = applicationsDecision.allowed;
+  const applicationsOpen = membershipYear
+    ? isApplicationsOpenNow({
+        applicationEnabled: membershipYear.applicationEnabled,
+        applicationOpensAt: applicationWindow.opensAt,
+        applicationClosesAt: applicationWindow.closesAt,
+        signupEnabled: membershipYear.signupEnabled,
+        signupDate: membershipYear.signupDate,
+        membershipCap: membershipYear.membershipCap,
+        activeEnrollments,
+      })
+    : false;
+  const closedReasons = membershipYear
+    ? explainApplicationsClosed({
+        applicationEnabled: membershipYear.applicationEnabled,
+        applicationOpensAt: applicationWindow.opensAt,
+        applicationClosesAt: applicationWindow.closesAt,
+        signupEnabled: membershipYear.signupEnabled,
+        signupDate: membershipYear.signupDate,
+        membershipCap: membershipYear.membershipCap,
+        activeEnrollments,
+      }).reasons
+    : ["Applications are currently closed by the club."];
 
   return (
     <PageShell
@@ -174,7 +194,7 @@ export default async function AdminApplicationsPage({
             ) : (
               <>
                 <p className="mt-1 text-gray-700">
-                  {applicationsDecision.message} Open settings to allow public access to{" "}
+                  {closedReasons[0] ?? "Applications are currently closed by the club."} Open settings to allow public access to{" "}
                   <span className="rounded bg-gray-200 px-1 py-0.5 font-mono">/apply</span>.
                 </p>
                 <Link

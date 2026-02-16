@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import type { MemberDiscipline } from "@prisma/client";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { formatCityState, validateStructuredAddress } from "@/lib/address";
 import { MEMBER_DISCIPLINE_OPTIONS, parseDisciplineInterests } from "@/lib/discipline";
 import { secureDlNumber } from "@/lib/dl-security";
 import { isSeniorFromDob } from "@/lib/membership-dates";
@@ -106,7 +107,11 @@ export default async function AdminMembersPage({
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     const phone = String(formData.get("phone") ?? "").trim() || null;
-    const address = String(formData.get("address") ?? "").trim() || null;
+    const street1 = String(formData.get("street1") ?? "").trim();
+    const street2 = String(formData.get("street2") ?? "").trim() || null;
+    const city = String(formData.get("city") ?? "").trim();
+    const state = String(formData.get("state") ?? "").trim().toUpperCase();
+    const zip = String(formData.get("zip") ?? "").trim();
     const dob = parseDateInput(formData.get("dob"));
     const isDisabledVeteran = formData.get("isDisabledVeteran") === "on";
     const isActive = formData.get("isActive") === "on";
@@ -121,6 +126,16 @@ export default async function AdminMembersPage({
     if (!name || !email || !password) {
       throw new Error("Name, email, and password are required.");
     }
+    const parsedAddress = validateStructuredAddress({
+      street1,
+      street2,
+      city,
+      state,
+      zip,
+    });
+    if (parsedAddress.errors.length > 0) {
+      throw new Error(parsedAddress.errors[0]);
+    }
 
     const member = await prisma.member.create({
       data: {
@@ -128,7 +143,11 @@ export default async function AdminMembersPage({
         email,
         passwordHash: hashPassword(password),
         phone,
-        address,
+        street1: parsedAddress.value.street1,
+        street2: parsedAddress.value.street2,
+        city: parsedAddress.value.city,
+        state: parsedAddress.value.state,
+        zip: parsedAddress.value.zip,
         dob,
         isDisabledVeteran,
         isSenior: isSeniorFromDob(dob),
@@ -167,7 +186,11 @@ export default async function AdminMembersPage({
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     const phone = String(formData.get("phone") ?? "").trim() || null;
-    const address = String(formData.get("address") ?? "").trim() || null;
+    const street1 = String(formData.get("street1") ?? "").trim();
+    const street2 = String(formData.get("street2") ?? "").trim() || null;
+    const city = String(formData.get("city") ?? "").trim();
+    const state = String(formData.get("state") ?? "").trim().toUpperCase();
+    const zip = String(formData.get("zip") ?? "").trim();
     const dob = parseDateInput(formData.get("dob"));
     const isDisabledVeteran = formData.get("isDisabledVeteran") === "on";
     const isActive = formData.get("isActive") === "on";
@@ -182,6 +205,16 @@ export default async function AdminMembersPage({
     if (!memberId || !name || !email) {
       throw new Error("Member ID, name, and email are required.");
     }
+    const parsedAddress = validateStructuredAddress({
+      street1,
+      street2,
+      city,
+      state,
+      zip,
+    });
+    if (parsedAddress.errors.length > 0) {
+      throw new Error(parsedAddress.errors[0]);
+    }
 
     const member = await prisma.member.update({
       where: { id: memberId },
@@ -189,7 +222,11 @@ export default async function AdminMembersPage({
         name,
         email,
         phone,
-        address,
+        street1: parsedAddress.value.street1,
+        street2: parsedAddress.value.street2,
+        city: parsedAddress.value.city,
+        state: parsedAddress.value.state,
+        zip: parsedAddress.value.zip,
         dob,
         isDisabledVeteran,
         isSenior: isSeniorFromDob(dob),
@@ -353,6 +390,9 @@ export default async function AdminMembersPage({
                   <td className="px-3 py-2">
                     <p className="font-medium">{member.name}</p>
                     <p className="text-xs text-gray-600">{member.email}</p>
+                    <p className="text-xs text-gray-500">
+                      {formatCityState({ city: member.city, state: member.state }) || "Location not set"}
+                    </p>
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1">
@@ -467,9 +507,38 @@ export default async function AdminMembersPage({
             />
             <input
               className="rounded border p-2"
-              defaultValue={selectedMember.address ?? ""}
-              name="address"
-              placeholder="Address"
+              defaultValue={selectedMember.street1}
+              name="street1"
+              placeholder="Street address"
+              required
+            />
+            <input
+              className="rounded border p-2"
+              defaultValue={selectedMember.street2 ?? ""}
+              name="street2"
+              placeholder="Apt / Suite (optional)"
+            />
+            <input
+              className="rounded border p-2"
+              defaultValue={selectedMember.city}
+              name="city"
+              placeholder="City"
+              required
+            />
+            <input
+              className="rounded border p-2 uppercase"
+              defaultValue={selectedMember.state}
+              maxLength={2}
+              name="state"
+              placeholder="State (2 letters)"
+              required
+            />
+            <input
+              className="rounded border p-2"
+              defaultValue={selectedMember.zip}
+              name="zip"
+              placeholder="ZIP"
+              required
             />
             <input
               className="rounded border p-2"
@@ -567,7 +636,11 @@ export default async function AdminMembersPage({
             required
           />
           <input className="rounded border p-2" name="phone" placeholder="Phone (optional)" />
-          <input className="rounded border p-2" name="address" placeholder="Address (optional)" />
+          <input className="rounded border p-2" name="street1" placeholder="Street address" required />
+          <input className="rounded border p-2" name="street2" placeholder="Apt / Suite (optional)" />
+          <input className="rounded border p-2" name="city" placeholder="City" required />
+          <input className="rounded border p-2 uppercase" maxLength={2} name="state" placeholder="State (2 letters)" required />
+          <input className="rounded border p-2" name="zip" placeholder="ZIP" required />
           <input className="rounded border p-2" name="dob" type="date" />
 
           <div className="flex items-center gap-4 md:col-span-2">

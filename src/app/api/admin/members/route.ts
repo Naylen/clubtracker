@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { validateStructuredAddress } from "@/lib/address";
 import { validateDisciplineInterests } from "@/lib/discipline";
 import { secureDlNumber } from "@/lib/dl-security";
 import { isSeniorFromDob } from "@/lib/membership-dates";
@@ -46,7 +47,11 @@ export async function POST(request: NextRequest) {
     email?: string;
     password?: string;
     phone?: string | null;
-    address?: string | null;
+    street1?: string | null;
+    street2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    zip?: string | null;
     dob?: string | null;
     isDisabledVeteran?: boolean;
     emergencyContactName?: string | null;
@@ -76,6 +81,16 @@ export async function POST(request: NextRequest) {
 
   const dlNumberRaw = body.dlNumber?.trim();
   const secureDlFields = dlNumberRaw ? secureDlNumber(dlNumberRaw) : null;
+  const parsedAddress = validateStructuredAddress({
+    street1: body.street1,
+    street2: body.street2,
+    city: body.city,
+    state: body.state,
+    zip: body.zip,
+  });
+  if (parsedAddress.errors.length > 0) {
+    return NextResponse.json({ error: parsedAddress.errors[0] }, { status: 400 });
+  }
 
   const member = await prisma.member.create({
     data: {
@@ -83,7 +98,11 @@ export async function POST(request: NextRequest) {
       email: body.email.trim().toLowerCase(),
       passwordHash: hashPassword(body.password),
       phone: body.phone?.trim() || null,
-      address: body.address?.trim() || null,
+      street1: parsedAddress.value.street1,
+      street2: parsedAddress.value.street2,
+      city: parsedAddress.value.city,
+      state: parsedAddress.value.state,
+      zip: parsedAddress.value.zip,
       dob,
       isDisabledVeteran: body.isDisabledVeteran === true,
       isSenior: isSeniorFromDob(dob),

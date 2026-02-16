@@ -221,7 +221,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 - Public `/apply` availability is controlled from `Admin -> Settings -> Application Settings`:
   - `Applications Open (Public /apply)` toggle
   - Optional public open/close dates
-  - Optional `Signup Day Gate` window (or defaults to signup day 00:00-23:59 America/New_York)
+- Signup day scheduling is controlled from `Admin -> Settings -> Signup Day`:
+  - `Signup Day Scheduled` and `Signup Day Override` are informational for applicants/admin planning.
+  - Signup day does not by itself open/close `/apply` unless a dedicated gate setting is added.
 - Applicants can request disabled-veteran discount, but cannot choose pricing tiers.
 - Admin must approve application and assign a pricing tier before payment is available.
 - Stripe checkout uses the assigned tier amount for approved applications.
@@ -276,7 +278,8 @@ Supported headers are case-insensitive and accept common aliases:
 
 - Required: `email`
 - Name: `name` or `firstName` + `lastName`
-- Optional: `phone`, `address`, `city`, `state`, `zip`, `dateOfBirth`, `isDisabledVeteran`, `status`, `role`
+- Address: `street1`, `street2`, `city`, `state`, `zip` (legacy single `address` is still accepted and maps to `street1`)
+- Optional: `phone`, `dateOfBirth`, `isDisabledVeteran`, `status`, `role`
 - `dateOfBirth` format: `YYYY-MM-DD` or `MM/DD/YYYY`
 - `isDisabledVeteran`: `true/false`, `yes/no`, `1/0`
 - `status`: `ACTIVE`, `INACTIVE`, `PENDING`
@@ -284,7 +287,7 @@ Supported headers are case-insensitive and accept common aliases:
 Example file: `docs/examples/members.sample.csv`
 
 ```csv
-email,firstName,lastName,phone,address,city,state,zip,dateOfBirth,isDisabledVeteran,status
-alice@example.com,Alice,Carson,859-555-1000,101 Oak St,Mount Sterling,KY,40353,1958-03-14,yes,ACTIVE
-bob@example.com,Bob,King,859-555-1001,202 Pine Rd,Mount Sterling,KY,40353,07/22/1989,no,INACTIVE
+email,firstName,lastName,phone,street1,street2,city,state,zip,dateOfBirth,isDisabledVeteran,status
+alice@example.com,Alice,Carson,859-555-1000,101 Oak St,,Mount Sterling,KY,40353,1958-03-14,yes,ACTIVE
+bob@example.com,Bob,King,859-555-1001,202 Pine Rd,Apt 2,Mount Sterling,KY,40353,07/22/1989,no,INACTIVE
 ```

@@ -21,11 +21,13 @@ describe("member CSV import parsing", () => {
       email: "jane@example.com",
       name: "Jane Doe",
       phone: "555-5555",
+      street1: "12 Main",
+      city: "Mount Sterling",
+      state: "KY",
+      zip: "40353",
       isDisabledVeteran: true,
       isActive: true,
     });
-    expect(prepared.rows[0].address).toContain("12 Main");
-    expect(prepared.rows[0].address).toContain("Mount Sterling");
   });
 });
 
@@ -47,9 +49,9 @@ describe("member CSV import validation", () => {
 describe("member CSV import upsert behavior", () => {
   it("updates existing users and creates missing users", async () => {
     const csv = [
-      "email,name",
-      "existing@example.com,Existing Member Updated",
-      "new@example.com,Brand New Member",
+      "email,name,street1,city,state,zip",
+      "existing@example.com,Existing Member Updated,12 Main,Mount Sterling,KY,40353",
+      "new@example.com,Brand New Member,99 Lake Rd,Mount Sterling,KY,40353",
     ].join("\n");
 
     const prepared = prepareMemberCsvImport(csv, DEFAULT_MEMBER_IMPORT_OPTIONS);

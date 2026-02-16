@@ -125,11 +125,9 @@ describe("/apply gating", () => {
       },
       decision: {
         allowed: false,
-        reasonCode: "APPLICATIONS_TOGGLE_OFF",
         message: "Applications are currently closed by the club.",
+        reasons: ["Applications are currently closed by the club."],
         signupDay: new Date("2026-02-07T12:00:00-05:00"),
-        gateStartsAt: null,
-        gateEndsAt: null,
       },
     });
 
@@ -137,7 +135,6 @@ describe("/apply gating", () => {
     const jsx = await pageModule.default({ searchParams: {} });
     const pageText = collectText(jsx).join(" ");
 
-    expect(pageText).toContain("Applications Are Closed");
     expect(pageText).toContain("Applications are currently closed by the club.");
     expect(pageText).toContain("Existing member renewal");
   });
@@ -150,11 +147,9 @@ describe("/apply gating", () => {
       },
       decision: {
         allowed: true,
-        reasonCode: "OPEN",
         message: "Applications are open.",
+        reasons: [],
         signupDay: new Date("2026-02-07T12:00:00-05:00"),
-        gateStartsAt: null,
-        gateEndsAt: null,
       },
     });
 
@@ -162,9 +157,9 @@ describe("/apply gating", () => {
     const jsx = await pageModule.default({ searchParams: {} });
     const pageText = collectText(jsx).join(" ");
 
-    expect(pageText).toContain("New Member Application");
     expect(pageText).toContain("How This Works");
     expect(pageText).toContain("Step 1: Applicant Account");
+    expect(pageText).toContain("Street Address");
+    expect(pageText).toContain("ZIP");
   });
 });
-

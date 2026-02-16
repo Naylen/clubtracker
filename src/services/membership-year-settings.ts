@@ -1,11 +1,6 @@
 import { prisma } from "@/lib/db";
 import { buildMembershipYearDates, getCurrentYearInNewYork } from "@/lib/membership-dates";
 import {
-  getApplicationSignupDayGate,
-  setApplicationSignupDayGate,
-  type SignupDayGateSettings,
-} from "@/services/application-policy";
-import {
   countActiveEnrollments,
   createOrOpenMembershipYear,
   DEFAULT_MEMBERSHIP_CAP,
@@ -29,9 +24,6 @@ export type MembershipYearSettingsResponse = {
   applicationEnabled: boolean;
   applicationOpensAt: string | null;
   applicationClosesAt: string | null;
-  applicationSignupDayGateEnabled: boolean;
-  applicationSignupGateStartsAt: string | null;
-  applicationSignupGateEndsAt: string | null;
   lateRenewalsEnabled: boolean;
   lateRenewalPolicyNotes: string;
   activeEnrollments: number;
@@ -49,9 +41,6 @@ type MembershipYearSettingsUpdateInput = {
   applicationEnabled?: boolean;
   applicationOpensAt?: string | null;
   applicationClosesAt?: string | null;
-  enforceSignupDayWindow?: boolean;
-  applicationSignupGateStartsAt?: string | null;
-  applicationSignupGateEndsAt?: string | null;
   lateRenewalsEnabled?: boolean;
   lateRenewalPolicyNotes?: string;
 };
@@ -111,7 +100,6 @@ function toSettingsResponse(input: {
     opensAt: string | null;
     closesAt: string | null;
   };
-  signupDayGate: SignupDayGateSettings;
   lateRenewalPolicy: {
     enabled: boolean;
     policyNotes: string;
@@ -133,9 +121,6 @@ function toSettingsResponse(input: {
     applicationEnabled: input.applicationEnabled,
     applicationOpensAt: input.applicationWindow.opensAt,
     applicationClosesAt: input.applicationWindow.closesAt,
-    applicationSignupDayGateEnabled: input.signupDayGate.enforceSignupDayWindow,
-    applicationSignupGateStartsAt: input.signupDayGate.startsAt,
-    applicationSignupGateEndsAt: input.signupDayGate.endsAt,
     lateRenewalsEnabled: input.lateRenewalPolicy.enabled,
     lateRenewalPolicyNotes: input.lateRenewalPolicy.policyNotes,
     activeEnrollments: input.activeEnrollments,
@@ -146,16 +131,14 @@ function toSettingsResponse(input: {
 export async function getOrCreateMembershipYearSettings(yearInput?: number) {
   const year = ensureValidYear(yearInput ?? getCurrentYearInNewYork());
   const membershipYear = await createOrOpenMembershipYear(year);
-  const [applicationWindow, signupDayGate, lateRenewalPolicy, activeEnrollments] = await Promise.all([
+  const [applicationWindow, lateRenewalPolicy, activeEnrollments] = await Promise.all([
     getApplicationWindow(year),
-    getApplicationSignupDayGate(year),
     getLateRenewalPolicy(),
     countActiveEnrollments(membershipYear.id),
   ]);
   return toSettingsResponse({
     ...membershipYear,
     applicationWindow,
-    signupDayGate,
     lateRenewalPolicy,
     activeEnrollments,
   });
@@ -283,33 +266,9 @@ export async function updateMembershipYearSettings(input: {
     });
   }
 
-  if (
-    input.data.enforceSignupDayWindow !== undefined ||
-    input.data.applicationSignupGateStartsAt !== undefined ||
-    input.data.applicationSignupGateEndsAt !== undefined
-  ) {
-    const currentSignupGate = await getApplicationSignupDayGate(year);
-    await setApplicationSignupDayGate({
-      year,
-      enforceSignupDayWindow:
-        input.data.enforceSignupDayWindow !== undefined
-          ? Boolean(input.data.enforceSignupDayWindow)
-          : currentSignupGate.enforceSignupDayWindow,
-      startsAt:
-        input.data.applicationSignupGateStartsAt !== undefined
-          ? input.data.applicationSignupGateStartsAt
-          : currentSignupGate.startsAt,
-      endsAt:
-        input.data.applicationSignupGateEndsAt !== undefined
-          ? input.data.applicationSignupGateEndsAt
-          : currentSignupGate.endsAt,
-    });
-  }
-
-  const [applicationWindow, signupDayGate, lateRenewalPolicy, activeEnrollments] =
+  const [applicationWindow, lateRenewalPolicy, activeEnrollments] =
     await Promise.all([
       getApplicationWindow(year),
-      getApplicationSignupDayGate(year),
       getLateRenewalPolicy(),
       countActiveEnrollments(updated.id),
     ]);
@@ -317,7 +276,6 @@ export async function updateMembershipYearSettings(input: {
   return toSettingsResponse({
     ...updated,
     applicationWindow,
-    signupDayGate,
     lateRenewalPolicy,
     activeEnrollments,
   });

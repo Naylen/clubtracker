@@ -64,9 +64,6 @@ export async function PUT(request: NextRequest) {
       applicationEnabled?: boolean;
       applicationOpensAt?: string | null;
       applicationClosesAt?: string | null;
-      enforceSignupDayWindow?: boolean;
-      applicationSignupGateStartsAt?: string | null;
-      applicationSignupGateEndsAt?: string | null;
       lateRenewalsEnabled?: boolean;
       lateRenewalPolicyNotes?: string;
     };
